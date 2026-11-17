@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Handschrift – Text in deine eigene Schrift</title>
+  <meta name="description" content="Getippten Text in deine eigene Handschrift umwandeln – als Bild, PDF oder radierbar für GoodNotes. Läuft komplett im Browser.">
+  <meta name="theme-color" content="#f4f2ec">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Handschrift">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 23c4-1 6-7 9-11s6-6 8-4-2 6-5 8-6 4-3 5 6-3 9-3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Handschrift</div>
+    <nav class="tabs" aria-label="Bereiche">
+      <button type="button" data-tab="write">Schreiben</button>
+      <button type="button" data-tab="font">Meine Schrift</button>
+      <button type="button" data-tab="gn">GoodNotes</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ============================== SCHREIBEN -->
+    <section id="tab-write" class="tab">
+      <div class="write-layout">
+        <aside class="panel controls">
+          <div class="field">
+            <label for="text">Dein Text</label>
+            <textarea id="text" rows="7" placeholder="Text hier eintippen oder aus ChatGPT einfügen …">Hallo! Das hier ist meine eigene Handschrift.</textarea>
+            <div class="row">
+              <button type="button" id="paste" class="btn small">Einfügen</button>
+              <button type="button" id="clear-text" class="btn small ghost">Leeren</button>
+              <label class="check small"><input type="checkbox" id="set-strip"> ChatGPT-Formatierung entfernen</label>
+            </div>
+          </div>
+
+          <details open>
+            <summary>Papier</summary>
+            <div class="field">
+              <label for="set-paper">Lineatur</label>
+              <select id="set-paper"></select>
+            </div>
+            <div class="field">
+              <span class="label">Papierfarbe</span>
+              <div class="swatches" id="set-paper-color"></div>
+            </div>
+            <div class="field">
+              <label for="set-format">Seitenformat</label>
+              <select id="set-format">
+                <option value="a4">A4</option>
+                <option value="vorlage">Wie meine GoodNotes-Vorlage</option>
+              </select>
+            </div>
+            <div class="field range"><label for="set-line">Zeilenabstand <output></output></label><input type="range" id="set-line" min="0" max="16" step="0.5"></div>
+          </details>
+
+          <details open>
+            <summary>Stift</summary>
+            <div class="field">
+              <div class="segmented" id="set-pen">
+                <button type="button" data-v="ballpoint">Kugelschreiber</button>
+                <button type="button" data-v="fountain">Füller</button>
+              </div>
+            </div>
+            <div class="field">
+              <span class="label">Farbe</span>
+              <div class="swatches" id="set-ink"></div>
+            </div>
+            <div class="field range"><label for="set-width">Strichstärke <output></output></label><input type="range" id="set-width" min="0.2" max="1.2" step="0.05"></div>
+          </details>
+
+          <details open>
+            <summary>Schrift</summary>
+            <div class="field range"><label for="set-size">Größe <output></output></label><input type="range" id="set-size" min="50" max="160" step="1"></div>
+            <div class="field range"><label for="set-mess">Unordentlichkeit <output></output></label><input type="range" id="set-mess" min="0" max="100" step="1"></div>
+            <div class="field range"><label for="set-slant">Neigung <output></output></label><input type="range" id="set-slant" min="-20" max="25" step="1"></div>
+            <div class="field range"><label for="set-letter">Buchstabenabstand <output></output></label><input type="range" id="set-letter" min="20" max="250" step="5"></div>
+            <div class="field range"><label for="set-word">Wortabstand <output></output></label><input type="range" id="set-word" min="40" max="250" step="5"></div>
+            <button type="button" id="reroll" class="btn small ghost wide">🎲 Neu würfeln</button>
+          </details>
+        </aside>
+
+        <div class="preview-col">
+          <div class="preview-bar">
+            <span id="page-info" class="muted"></span>
+            <div class="export">
+              <button type="button" id="export-png" class="btn">Bild</button>
+              <button type="button" id="export-pdf" class="btn">PDF</button>
+              <button type="button" id="export-gn" class="btn primary" title="Als GoodNotes-Datei – jeder Strich radierbar">GoodNotes <small>radierbar</small></button>
+            </div>
+          </div>
+          <div id="missing" class="notice" hidden></div>
+          <div id="pages" class="pages"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== MEINE SCHRIFT -->
+    <section id="tab-font" class="tab">
+      <div class="font-layout">
+        <div class="editor">
+          <div class="editor-head">
+            <div class="cur-char" id="cur-char">a</div>
+            <p id="cur-hint" class="muted"></p>
+          </div>
+          <div class="pad-wrap"><canvas id="pad" aria-label="Schreibfläche"></canvas></div>
+          <div class="row editor-actions">
+            <button type="button" id="prev-char" class="btn ghost">‹</button>
+            <button type="button" id="pad-undo" class="btn ghost">Rückgängig</button>
+            <button type="button" id="pad-clear" class="btn ghost">Leeren</button>
+            <button type="button" id="pad-save" class="btn primary grow">Speichern ✓</button>
+            <button type="button" id="next-char" class="btn ghost">›</button>
+          </div>
+          <label class="check small"><input type="checkbox" id="auto-next" checked> Nach 3 Varianten automatisch zum nächsten Zeichen</label>
+          <div id="variants" class="variants"></div>
+        </div>
+        <aside class="panel charset-panel">
+          <div class="progress" id="font-progress"></div>
+          <div id="charset"></div>
+          <div class="row wrap">
+            <button type="button" id="font-export" class="btn small">Schrift sichern</button>
+            <label class="btn small">Schrift laden<input type="file" id="font-import" accept=".json,application/json" hidden></label>
+            <button type="button" id="font-reset" class="btn small danger">Alles löschen</button>
+          </div>
+          <p class="muted small">Deine Buchstaben bleiben nur auf diesem Gerät. Sichere sie ab und zu als Datei – Safari löscht Website-Daten, wenn du die App 7 Tage nicht öffnest (außer sie liegt auf dem Home-Bildschirm).</p>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============================== GOODNOTES -->
+    <section id="tab-gn" class="tab">
+      <div class="gn-layout">
+        <div class="panel">
+          <h2>Radierbar in GoodNotes</h2>
+          <p>Damit die Schrift in GoodNotes aus echten Stiftstrichen besteht (radierbar, verschiebbar, Farbe änderbar), braucht die App <b>einmal</b> eine leere Notiz aus deinem GoodNotes als Vorlage:</p>
+          <ol class="steps">
+            <li>In GoodNotes ein <b>neues Notizbuch</b> mit <b>einer</b> Seite anlegen (Papier egal).</li>
+            <li>Mit dem <b>Kugelschreiber</b> irgendwo einen kleinen Strich machen.</li>
+            <li>Notizbuch → <b>Teilen/Exportieren</b> → Format <b>„GoodNotes“</b> → „In Dateien sichern“.</li>
+            <li>Hier die Datei laden:</li>
+          </ol>
+          <div class="row">
+            <label class="btn primary">Vorlage laden (.goodnotes)<input type="file" id="gn-template" accept=".goodnotes,application/octet-stream" hidden></label>
+            <button type="button" id="gn-template-remove" class="btn ghost" hidden>Vorlage entfernen</button>
+          </div>
+          <div id="gn-status"></div>
+          <label class="check"><input type="checkbox" id="set-keep-bg"> Papier der Vorlage behalten (sonst wird die gewählte Lineatur als Hintergrund eingesetzt)</label>
+        </div>
+        <div class="panel">
+          <h3>So importierst du</h3>
+          <p>Auf dem iPad öffnet „GoodNotes radierbar“ das Teilen-Menü → <b>GoodNotes</b> wählen. Oder Datei speichern und in GoodNotes über <b>Neu → Importieren</b> öffnen (nicht über „Seite hinzufügen“).</p>
+          <p class="muted small">Pro Seite entsteht eine Datei. Der GoodNotes-Export ist neu und experimentell – wenn GoodNotes eine Datei ablehnt, nimm vorerst PDF oder Bild.</p>
+          <h3>Direkt aus ChatGPT</h3>
+          <p class="small">Jeder Link der Form <code id="share-link-example"></code> öffnet die App mit dem Text schon eingefügt. Der Text bleibt dabei auf deinem Gerät (er steht hinter dem #).</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script>
+    document.getElementById('share-link-example').textContent = location.origin + location.pathname + '#text=Dein%20Text';
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
