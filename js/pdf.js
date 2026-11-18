@@ -69,6 +69,30 @@ export function pageContent({ pageMm, paper, strokes, pen, includePaper = true, 
   return out.join('\n');
 }
 
+// Content streams are bytes; text strings use WinAnsi (≈ Latin-1, € = 0x80).
+function winAnsi(str) {
+  const out = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    out[i] = c < 256 ? c : c === 0x20ac ? 0x80 : 0x3f;
+  }
+  return out;
+}
+
+/** Text operator (Helvetica). x/y in mm from top-left, size in pt. */
+export function pdfText(x, y, sizePt, text, color, pageHmm) {
+  const s = text.replace(/[\\()]/g, (c) => '\\' + c);
+  return `BT ${rgb(color)} rg /F1 ${n(sizePt)} Tf ${n(x * MM)} ${n((pageHmm - y) * MM)} Td (${s}) Tj ET`;
+}
+
+/** Stroked rectangle / line helpers (mm, top-left origin). */
+export function pdfRect(x, y, w, h, color, widthMm, pageHmm) {
+  return `${rgb(color)} RG ${n(widthMm * MM)} w ${n(x * MM)} ${n((pageHmm - y - h) * MM)} ${n(w * MM)} ${n(h * MM)} re S`;
+}
+export function pdfLine(x1, y1, x2, y2, color, widthMm, pageHmm, dash) {
+  return `${rgb(color)} RG ${n(widthMm * MM)} w ${dash ? `[${dash.map((d) => n(d * MM)).join(' ')}] 0 d` : '[] 0 d'} ${n(x1 * MM)} ${n((pageHmm - y1) * MM)} m ${n(x2 * MM)} ${n((pageHmm - y2) * MM)} l S`;
+}
+
 async function deflate(bytes) {
   if (typeof CompressionStream === 'undefined') return null;
   const cs = new CompressionStream('deflate');
@@ -96,18 +120,23 @@ export async function buildPdf(pages) {
 
   push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
   const kids = pages.map((_, i) => `${3 + i * 2} 0 R`).join(' ');
+  const fontId = 3 + pages.length * 2;
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
   obj(2, `<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
   for (let i = 0; i < pages.length; i++) {
     const p = pages[i];
     const pid = 3 + i * 2;
-    obj(pid, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(p.wPt)} ${n(p.hPt)}] /Contents ${pid + 1} 0 R /Resources << >> >>`);
-    const raw = enc.encode(p.content);
+    obj(
+      pid,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n(p.wPt)} ${n(p.hPt)}] /Contents ${pid + 1} 0 R /Resources << /Font << /F1 ${fontId} 0 R >> >> >>`,
+    );
+    const raw = winAnsi(p.content);
     const z = await deflate(raw);
     const data = z || raw;
     obj(pid + 1, [`<< /Length ${data.length}${z ? ' /Filter /FlateDecode' : ''} >>\nstream\n`, data, '\nendstream']);
   }
-  const count = 3 + pages.length * 2;
+  obj(fontId, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+  const count = fontId + 1;
   const xref = length;
   let x = `xref\n0 ${count}\n0000000000 65535 f \n`;
   for (let id = 1; id < count; id++) x += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
