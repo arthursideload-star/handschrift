@@ -1,15 +1,36 @@
 // Paper templates. All measures in millimetres, y grows downwards.
 
 export const PAPERS = {
-  liniert: { name: 'Liniert (8,5 mm)', kind: 'lines', spacing: 8.5, top: 26 },
-  'liniert-eng': { name: 'Liniert eng (7 mm)', kind: 'lines', spacing: 7, top: 24 },
-  'liniert-weit': { name: 'Liniert weit (10 mm)', kind: 'lines', spacing: 10, top: 28 },
-  'liniert-rand': { name: 'Liniert mit Rand', kind: 'lines', spacing: 8.5, top: 26, marginLeft: 24, marginRight: 14 },
-  kariert: { name: 'Kariert (5 mm)', kind: 'grid', grid: 5, spacing: 10 },
-  'kariert-rand': { name: 'Kariert mit Rand', kind: 'grid', grid: 5, spacing: 10, marginLeft: 25 },
-  punkte: { name: 'Punktraster (5 mm)', kind: 'dots', grid: 5, spacing: 10 },
-  cornell: { name: 'Cornell-Notizen', kind: 'lines', spacing: 8.5, top: 34, marginLeft: 62, cornell: true },
-  blanko: { name: 'Blanko', kind: 'blank', spacing: 9 },
+  leer: { name: 'Leer', kind: 'blank', spacing: 9 },
+  'liniert-eng': { name: 'Liniert – Eng (7 mm)', kind: 'lines', spacing: 7, top: 24 },
+  liniert: { name: 'Liniert – Mittel (8,5 mm)', kind: 'lines', spacing: 8.5, top: 26 },
+  'liniert-weit': { name: 'Liniert – Weit (10 mm)', kind: 'lines', spacing: 10, top: 28 },
+  'kariert-eng': { name: 'Kariert – Eng (4 mm)', kind: 'grid', grid: 4, spacing: 8 },
+  kariert: { name: 'Kariert – Mittel (5 mm)', kind: 'grid', grid: 5, spacing: 10 },
+  'kariert-weit': { name: 'Kariert – Weit (7 mm)', kind: 'grid', grid: 7, spacing: 7 },
+  'punkte-eng': { name: 'Gepunktet – Eng (4 mm)', kind: 'dots', grid: 4, spacing: 8 },
+  punkte: { name: 'Gepunktet – Mittel (5 mm)', kind: 'dots', grid: 5, spacing: 10 },
+  'punkte-weit': { name: 'Gepunktet – Weit (7 mm)', kind: 'dots', grid: 7, spacing: 7 },
+  cornell: { name: 'Cornell', kind: 'lines', spacing: 8.5, top: 34, marginLeft: 62, cornell: true },
+  // Older variants: still drawn, but only reachable through saved settings.
+  'liniert-rand': { hidden: true, name: 'Liniert mit Rand', kind: 'lines', spacing: 8.5, top: 26, marginLeft: 24, marginRight: 14 },
+  'kariert-rand': { hidden: true, name: 'Kariert mit Rand', kind: 'grid', grid: 5, spacing: 10, marginLeft: 25 },
+  blanko: { hidden: true, name: 'Blanko', kind: 'blank', spacing: 9 },
+};
+
+// Old saved settings -> current keys (only used when loading).
+export const LEGACY_PAPERS = { blanko: 'leer', 'liniert-rand': 'liniert', 'kariert-rand': 'kariert' };
+
+// GoodNotes paper sizes (mm, portrait).
+export const PAGE_SIZES = {
+  standard: { name: 'Goodnotes Standard', w: 210, h: 280 },
+  a7: { name: 'A7', w: 74, h: 105 },
+  a6: { name: 'A6', w: 105, h: 148 },
+  a5: { name: 'A5', w: 148, h: 210 },
+  a4: { name: 'A4', w: 210, h: 297 },
+  a3: { name: 'A3', w: 297, h: 420 },
+  letter: { name: 'Letter', w: 215.9, h: 279.4 },
+  tabloid: { name: 'Tabloid', w: 279.4, h: 431.8 },
 };
 
 export const PAPER_COLORS = {

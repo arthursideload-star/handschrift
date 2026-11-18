@@ -1,6 +1,6 @@
 import * as store from './store.js';
 import { normalizeText, ALL_CHARS } from './charset.js';
-import { PAPERS, PAPER_COLORS, PAGE_A4, paperGeometry, paperOps } from './paper.js';
+import { PAPERS, PAPER_COLORS, PAGE_SIZES, LEGACY_PAPERS, paperGeometry, paperOps } from './paper.js';
 import { layoutText } from './layout.js';
 import { renderPage } from './render.js';
 import { buildPdf, pageContent, PT_PER_MM } from './pdf.js';
@@ -13,6 +13,7 @@ const DEFAULTS = {
   paper: 'liniert',
   paperColor: 'weiss',
   pageFormat: 'a4',
+  orientation: 'hoch',
   penType: 'ballpoint',
   inkColor: '#1f2f6b',
   penWidth: 0.45,
@@ -53,6 +54,9 @@ async function init() {
     const [font, settings, tpl] = await Promise.all([store.get('font'), store.get('settings'), store.get('gnTemplate')]);
     if (font && font.glyphs) state.font = font;
     if (settings) state.settings = { ...DEFAULTS, ...settings };
+    state.settings.paper = LEGACY_PAPERS[state.settings.paper] || state.settings.paper;
+    if (!PAPERS[state.settings.paper]) state.settings.paper = DEFAULTS.paper;
+    if (!PAGE_SIZES[state.settings.pageFormat] && state.settings.pageFormat !== 'vorlage') state.settings.pageFormat = DEFAULTS.pageFormat;
     if (tpl && tpl.buffer) {
       try {
         state.gnTemplate = await analyzeTemplate(tpl.buffer);
@@ -149,6 +153,7 @@ function buildSettingsUi() {
   const s = state.settings;
   const paperSel = $('set-paper');
   paperSel.innerHTML = Object.entries(PAPERS)
+    .filter(([, v]) => !v.hidden)
     .map(([k, v]) => `<option value="${k}">${v.name}</option>`)
     .join('');
   paperSel.value = s.paper;
@@ -181,7 +186,15 @@ function buildSettingsUi() {
     const b = e.target.closest('button');
     if (b) update({ penType: b.dataset.v });
   };
-  $('set-format').onchange = (e) => update({ pageFormat: e.target.value });
+  const fmtSel = $('set-format');
+  fmtSel.innerHTML =
+    Object.entries(PAGE_SIZES).map(([k, v]) => `<option value="${k}">${v.name} (${v.w.toString().replace('.', ',')} × ${v.h.toString().replace('.', ',')} mm)</option>`).join('') +
+    '<option value="vorlage">Wie meine GoodNotes-Vorlage</option>';
+  fmtSel.onchange = (e) => update({ pageFormat: e.target.value });
+  $('set-orient').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (b) update({ orientation: b.dataset.v });
+  };
 
   const ranges = [
     ['set-width', 'penWidth', (v) => `${v.toFixed(2).replace('.', ',')} mm`],
@@ -217,8 +230,12 @@ function syncSettingsUi() {
   document.querySelectorAll('#set-pen button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.penType));
   const fmt = $('set-format');
   fmt.querySelector('option[value="vorlage"]').disabled = !state.gnTemplate;
-  if (!state.gnTemplate && s.pageFormat === 'vorlage') s.pageFormat = 'a4';
+  if (!state.gnTemplate && s.pageFormat === 'vorlage') s.pageFormat = DEFAULTS.pageFormat;
   fmt.value = s.pageFormat;
+  document.querySelectorAll('#set-orient button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.v === s.orientation);
+    b.disabled = s.pageFormat === 'vorlage';
+  });
 }
 
 const saveSettings = debounce(() => store.set('settings', state.settings).catch(() => {}), 300);
@@ -234,7 +251,8 @@ function update(patch, fast = false) {
 // ------------------------------------------------------------------ layout + preview
 function pageSize() {
   if (state.settings.pageFormat === 'vorlage' && state.gnTemplate) return state.gnTemplate.pageMm;
-  return PAGE_A4;
+  const sz = PAGE_SIZES[state.settings.pageFormat] || PAGE_SIZES.a4;
+  return state.settings.orientation === 'quer' ? { w: sz.h, h: sz.w } : { w: sz.w, h: sz.h };
 }
 
 function compute() {

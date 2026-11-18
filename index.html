@@ -43,7 +43,7 @@
           <details open>
             <summary>Papier</summary>
             <div class="field">
-              <label for="set-paper">Lineatur</label>
+              <label for="set-paper">Papiervorlage</label>
               <select id="set-paper"></select>
             </div>
             <div class="field">
@@ -51,11 +51,14 @@
               <div class="swatches" id="set-paper-color"></div>
             </div>
             <div class="field">
-              <label for="set-format">Seitenformat</label>
-              <select id="set-format">
-                <option value="a4">A4</option>
-                <option value="vorlage">Wie meine GoodNotes-Vorlage</option>
-              </select>
+              <label for="set-format">Papierformat</label>
+              <select id="set-format"></select>
+            </div>
+            <div class="field">
+              <div class="segmented" id="set-orient">
+                <button type="button" data-v="hoch">Hochformat</button>
+                <button type="button" data-v="quer">Querformat</button>
+              </div>
             </div>
             <div class="field range"><label for="set-line">Zeilenabstand <output></output></label><input type="range" id="set-line" min="0" max="16" step="0.5"></div>
           </details>
