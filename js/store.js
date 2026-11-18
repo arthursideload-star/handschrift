@@ -28,9 +28,20 @@ function run(mode, fn) {
   );
 }
 
+// Change listeners (used by cloud sync). `quiet` writes don't notify, e.g.
+// when cloud data is written into the local cache.
+const listeners = new Set();
+export const onChange = (fn) => listeners.add(fn);
+const notify = (key, quiet) => (result) => {
+  if (!quiet) listeners.forEach((fn) => fn(key));
+  return result;
+};
+
 export const get = (key) => run('readonly', (s) => s.get(key));
-export const set = (key, value) => run('readwrite', (s) => s.put(value, key));
-export const del = (key) => run('readwrite', (s) => s.delete(key));
+export const set = (key, value, { quiet = false } = {}) =>
+  run('readwrite', (s) => s.put(value, key)).then(notify(key, quiet));
+export const del = (key, { quiet = false } = {}) =>
+  run('readwrite', (s) => s.delete(key)).then(notify(key, quiet));
 
 // Ask the browser not to evict our data (Safari deletes site data after
 // 7 days without a visit unless the app is on the home screen).

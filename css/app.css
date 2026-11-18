@@ -185,3 +185,40 @@ code { background: #efece4; padding: 2px 5px; border-radius: 5px; font-size: 12p
   .write-layout { grid-template-columns: 1fr; }
   .controls { position: static; max-height: none; }
 }
+
+/* ------------------------------------------------------------ account / cloud sync */
+.account { display: flex; align-items: center; gap: 10px; }
+.account-btn svg { width: 18px; height: 18px; }
+.sync-status { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.sync-status[data-state="ok"] { color: var(--ok); }
+.sync-status[data-state="offline"], .sync-status[data-state="error"] { color: var(--warn); }
+.cloud-dialog {
+  border: 1px solid var(--line); border-radius: 16px; padding: 0; width: min(440px, calc(100vw - 24px));
+  background: var(--panel); color: var(--ink); box-shadow: 0 20px 60px rgba(20, 20, 10, 0.25);
+}
+.cloud-dialog::backdrop { background: rgba(20, 24, 33, 0.35); }
+.cloud-form { padding: 20px; display: flex; flex-direction: column; gap: 10px; }
+.cloud-form h2 { margin: 0; font-size: 20px; }
+.cloud-form p { margin: 0; }
+.cloud-field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 14px; }
+.cloud-field input {
+  min-height: 44px; padding: 0 12px; border: 1px solid #d6d1c4; border-radius: 10px; background: #fff; font-size: 16px;
+}
+.cloud-msg:empty { display: none; }
+.cloud-msg { font-size: 14px; }
+.cloud-msg[data-kind="error"] { color: var(--danger); }
+.cloud-msg[data-kind="ok"] { color: var(--ok); }
+.cloud-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.cloud-actions .btn { min-height: 44px; }
+.cloud-actions.between { justify-content: space-between; margin-top: 4px; }
+.cloud-choices { display: flex; flex-direction: column; gap: 8px; }
+.cloud-choices .btn { flex-direction: column; min-height: 54px; gap: 2px; }
+.cloud-choices .btn small { font-weight: 500; font-size: 12px; opacity: .8; }
+@media (max-width: 980px) {
+  .brand { order: 0; }
+  .account { order: 1; margin-left: auto; }
+  .tabs { order: 2; }
+}
+@media (max-width: 520px) {
+  .sync-status { display: none; }
+}

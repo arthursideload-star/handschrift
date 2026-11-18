@@ -6,6 +6,7 @@ import { renderPage } from './render.js';
 import { buildPdf, pageContent, PT_PER_MM } from './pdf.js';
 import { analyzeTemplate, buildGoodnotes } from './goodnotes.js';
 import { createEditor } from './editor.js';
+import { initCloud } from './cloud.js';
 import { debounce, randomSeed, deliverFiles, toast } from './util.js';
 
 const DEFAULTS = {
@@ -113,6 +114,7 @@ async function init() {
   renderTemplateInfo();
   render();
   store.requestPersistence();
+  initCloud(); // optional login + sync; listens to store changes
 }
 
 function fail(err) {
