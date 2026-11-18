@@ -462,3 +462,10 @@ init();
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline-Modus nicht verfügbar', err));
 }
+
+// Font replaced from outside the editor (e.g. GoodNotes Schreibblatt import in sheet-ui.js).
+window.addEventListener('font-changed', (e) => {
+  if (e.detail && e.detail.font) state.font = e.detail.font;
+  if (state.editor) state.editor.refresh();
+  scheduleRender();
+});

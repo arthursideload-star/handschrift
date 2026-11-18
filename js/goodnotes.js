@@ -254,7 +254,9 @@ function parseClassicTpl(t) {
   let p = end + 1;
   const tool = dv.getUint16(p, true); p += 2;
   const width = dv.getFloat32(p, true); p += 4;
-  const nFlags = dv.getUint32(p, true); p += 4 + nFlags * 2;
+  const nFlags = dv.getUint32(p, true); p += 4;
+  const flags = [];
+  for (let i = 0; i < nFlags; i++) { flags.push(dv.getUint16(p, true)); p += 2; }
   const nStart = dv.getUint32(p, true); p += 4;
   const starts = [];
   for (let i = 0; i < nStart; i++) { starts.push([dv.getFloat32(p, true), dv.getFloat32(p + 4, true)]); p += 8; }
@@ -265,7 +267,32 @@ function parseClassicTpl(t) {
     p += 16;
   }
   const tail = dv.getUint16(p, true);
-  return { fmt, tool, width, starts, segs, tail };
+  return { fmt, tool, width, flags, starts, segs, tail };
+}
+
+/**
+ * Split a parsed classic TPL into subpaths (GoodNotes units). flags: 0 = start a new
+ * subpath at the next entry of starts[], anything else = next quadratic segment.
+ * offset = [dx, dy] from a lasso move (data record field 6), or null.
+ */
+export function tplPaths(t, offset) {
+  const ox = offset ? offset[0] : 0, oy = offset ? offset[1] : 0;
+  const flags = t.flags && t.flags.length ? t.flags : [0, ...t.segs.map(() => 1)];
+  const paths = [];
+  let si = 0, gi = 0, cur = null;
+  for (const f of flags) {
+    if (f === 0) {
+      const s = t.starts[si++];
+      if (!s) break;
+      cur = { start: [s[0] + ox, s[1] + oy], segs: [] };
+      paths.push(cur);
+    } else {
+      const g = t.segs[gi++];
+      if (!g || !cur) break;
+      cur.segs.push([g[0] + ox, g[1] + oy, g[2] + ox, g[3] + oy]);
+    }
+  }
+  return paths;
 }
 
 // ---------------------------------------------------------------- template
@@ -281,7 +308,17 @@ function parseStrokeData(rec) {
   try {
     const [tpl] = appleLz4Decode(blob.val, i);
     const color = decodeMsg(field(inner, 4)?.val || new Uint8Array());
+    // Lasso-moved strokes keep their points and get a translation in field 6
+    // ({f1: dx, f2: dy} as fixed32 floats); an empty string means "not moved".
+    let offset = null;
+    const off = field(inner, 6);
+    if (off && off.wt === 2 && off.val.length) {
+      const m = decodeMsg(off.val);
+      const dx = field(m, 1), dy = field(m, 2);
+      if (dx && dx.wt === 5 && dy && dy.wt === 5) offset = [f32(dx.val), f32(dy.val)];
+    }
     return {
+      offset,
       uuid: fieldStr(inner, 1),
       tpl: parseClassicTpl(tpl),
       color: color ? [1, 2, 3, 4].map((k) => (field(color, k) ? f32(field(color, k).val) : 1)) : null,
@@ -571,23 +608,53 @@ export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb) {
   return writeZip(entries, 'application/octet-stream');
 }
 
-/** Read back classic ballpoint strokes of every page (GoodNotes units) – used for checks/import. */
-export async function readStrokes(buffer) {
+/**
+ * Read every page of a notebook: classic ballpoint strokes (GoodNotes units, with
+ * lasso offset applied in `paths`), the number of strokes in other formats
+ * (fountain pen, pencil, highlighter …) and the MediaBox (pt) of the first PDF
+ * background, so callers can map GoodNotes units back to the PDF they imported.
+ */
+export async function readNotebook(buffer) {
   const entries = await readZip(buffer);
   const byName = new Map(entries.map((e) => [e.name, e]));
+  if (!byName.has('index.notes.pb')) throw new Error('Das ist keine GoodNotes-Datei (index.notes.pb fehlt).');
   const pages = splitDelimited(byName.get('index.notes.pb').data)
     .map((r) => decodeMsg(r))
     .filter(Boolean)
-    .map((f) => ({ uuid: fieldStr(f, 1), path: fieldStr(f, 2) }));
-  return pages.map((p) => {
-    const recs = splitDelimited(byName.get(p.path)?.data || new Uint8Array());
-    const strokes = [];
-    for (const r of recs) {
-      const d = parseStrokeData(r);
-      if (d && !d.erased && d.tpl && d.tpl.segs) strokes.push({ ...d.tpl, color: d.color, uuid: d.uuid });
+    .map((f) => ({ uuid: fieldStr(f, 1), path: fieldStr(f, 2) }))
+    .filter((p) => p.uuid && p.path);
+  let mediaBox = null;
+  if (byName.has('index.attachments.pb')) {
+    for (const r of splitDelimited(byName.get('index.attachments.pb').data)) {
+      const f = decodeMsg(r);
+      const path = f && fieldStr(f, 2);
+      const d = path && byName.get(path)?.data;
+      if (d && d[0] === 0x25 && d[1] === 0x50 && d[2] === 0x44 && d[3] === 0x46) {
+        mediaBox = pdfMediaBox(d);
+        if (mediaBox) break;
+      }
     }
-    return { ...p, strokes };
-  });
+  }
+  return {
+    mediaBox,
+    pages: pages.map((p) => {
+      const recs = splitDelimited(byName.get(p.path)?.data || new Uint8Array());
+      const strokes = [];
+      let other = 0;
+      for (const r of recs) {
+        const d = parseStrokeData(r);
+        if (!d || d.erased || !d.tpl) continue;
+        if (d.tpl.fmt !== CLASSIC_FMT) other++;
+        else if (d.tpl.segs) strokes.push({ ...d.tpl, color: d.color, uuid: d.uuid, offset: d.offset, paths: tplPaths(d.tpl, d.offset) });
+      }
+      return { ...p, strokes, other };
+    }),
+  };
+}
+
+/** Read back classic ballpoint strokes of every page (GoodNotes units) – used for checks/import. */
+export async function readStrokes(buffer) {
+  return (await readNotebook(buffer)).pages;
 }
 
 export { UUID_RE };
