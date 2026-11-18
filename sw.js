@@ -1,6 +1,6 @@
 // Offline support: the app opens even without internet (e.g. bad school Wi-Fi).
 // Strategy: serve from cache immediately, refresh the cache in the background.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHE = `handschrift-${VERSION}`;
 const SHELL = [
   './',
@@ -12,6 +12,9 @@ const SHELL = [
   './icon-512.png',
   './js/main.js',
   './js/charset.js',
+  './js/cloud.js',
+  './js/sheet.js',
+  './js/sheet-ui.js',
   './js/editor.js',
   './js/geom.js',
   './js/goodnotes.js',
