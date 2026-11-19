@@ -54,3 +54,17 @@ drop policy if exists "fonts: delete own row" on public.fonts;
 create policy "fonts: delete own row" on public.fonts
   for delete to authenticated
   using ((select auth.uid()) = user_id);
+
+-- Hardening (migration "handschrift_hardening"):
+-- only row-level operations (TRUNCATE would bypass RLS), size limits per row,
+-- no automatic API access to future tables/functions.
+revoke all on public.fonts from anon, authenticated, public;
+grant select, insert, update, delete on public.fonts to authenticated;
+revoke execute on function public.fonts_touch_updated_at() from public, anon, authenticated;
+alter table public.fonts
+  add constraint fonts_font_size check (font is null or pg_column_size(font) < 8 * 1024 * 1024),
+  add constraint fonts_settings_size check (settings is null or pg_column_size(settings) < 64 * 1024),
+  add constraint fonts_template_size check (template is null or pg_column_size(template) < 8 * 1024 * 1024);
+alter default privileges in schema public revoke all on tables from anon, authenticated;
+alter default privileges in schema public revoke all on functions from anon, authenticated, public;
+alter default privileges in schema public revoke all on sequences from anon, authenticated;
