@@ -4,7 +4,15 @@
 // x-height y = -0.5, descender y = +0.5; y grows downwards.
 
 import { mulberry32 } from './util.js';
-import { bbox, wobble } from './geom.js';
+import { bbox, wobble, cleanStroke } from './geom.js';
+
+// Glyphs drawn on iPad may contain late duplicate Pencil points – clean once per stroke.
+const cleaned = new WeakMap();
+const clean = (strokes) => {
+  let c = cleaned.get(strokes);
+  if (!c) cleaned.set(strokes, (c = strokes.map(cleanStroke)));
+  return c;
+};
 import { COMPOSE } from './charset.js';
 
 const DEG = Math.PI / 180;
@@ -56,14 +64,14 @@ export function layoutText(text, font, o) {
 
   function rawStrokesFor(ch) {
     const list = variantsFor(ch);
-    if (list) return pickVariant(ch, list).s;
+    if (list) return clean(pickVariant(ch, list).s);
     const comp = COMPOSE[ch];
     if (comp) {
       const base = variantsFor(comp[0]);
       const dots = variantsFor(comp[1]);
       if (base && dots) {
-        const b = pickVariant(comp[0], base).s;
-        const d = pickVariant(comp[1], dots).s;
+        const b = clean(pickVariant(comp[0], base).s);
+        const d = clean(pickVariant(comp[1], dots).s);
         const bb = bbox(b), db = bbox(d);
         const dx = (bb.x0 + bb.x1) / 2 - (db.x0 + db.x1) / 2;
         const dy = comp[2];

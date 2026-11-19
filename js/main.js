@@ -4,7 +4,7 @@ import { PAPERS, PAPER_COLORS, PAGE_SIZES, LEGACY_PAPERS, paperGeometry, paperOp
 import { layoutText } from './layout.js';
 import { renderPage } from './render.js';
 import { buildPdf, pageContent, PT_PER_MM } from './pdf.js';
-import { analyzeTemplate, buildGoodnotes } from './goodnotes.js';
+import { analyzeTemplate, buildGoodnotes, diagnosticFiles } from './goodnotes.js';
 import { createEditor } from './editor.js';
 import { initCloud } from './cloud.js';
 import { debounce, randomSeed, deliverFiles, toast } from './util.js';
@@ -110,6 +110,7 @@ async function init() {
   $('export-gn').onclick = () => exportGoodnotes().catch(fail);
   $('gn-template').addEventListener('change', (e) => loadTemplate(e.target.files[0]).catch(fail));
   $('gn-template-remove').onclick = removeTemplate;
+  $('gn-diag').onclick = () => exportDiagnostics().catch(fail);
   $('font-export').onclick = exportFont;
   $('font-import').addEventListener('change', (e) => importFont(e.target.files[0]).catch(fail));
   $('font-reset').onclick = resetFont;
@@ -403,6 +404,23 @@ async function exportGoodnotes() {
     'ok',
     6000,
   );
+}
+
+async function exportDiagnostics() {
+  const tpl = state.gnTemplate;
+  if (!tpl) return toast('Erst eine Vorlage laden.');
+  const res = compute();
+  let strokes = res.pages[0] && res.pages[0].strokes.length ? res.pages[0].strokes : null;
+  if (!strokes) strokes = [[20, 30, 0.5, 60, 40, 0.5, 100, 30, 0.5], [20, 50, 0.5, 100, 50, 0.5]];
+  const bg = await buildPdf([
+    { wPt: tpl.ptSize.w, hPt: tpl.ptSize.h, content: pageContent({ pageMm: res.page, paper: res.paper, strokes: [], pen: res.pen, includeInk: false }) },
+  ]);
+  const thumbCanvas = renderPage(document.createElement('canvas'), { strokes }, res.paper, res.pen, res.page, 1.6);
+  const thumb = new Uint8Array(await (await new Promise((r) => thumbCanvas.toBlob(r, 'image/jpeg', 0.8))).arrayBuffer());
+  const files = diagnosticFiles(tpl, strokes, res.pen, bg, thumb).map(
+    ([name, blob]) => new File([blob], `Test-${name}.goodnotes`, { type: 'application/octet-stream' }),
+  );
+  await deliverFiles(files);
 }
 
 // ------------------------------------------------------------------ GoodNotes template

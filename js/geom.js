@@ -56,6 +56,60 @@ export function bbox(strokes) {
   return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0 };
 }
 
+// iPad Safari sometimes hands out Apple Pencil points twice: an older position
+// arrives late (a zig back onto the path already drawn) and then the latest
+// point repeats. That leaves zigzags/notches in the line. Remove both:
+// exact repeats of a recent point, and single "late" points that lie on the
+// recent path while the next point continues forward.
+const NEAR2 = 0.0006 ** 2;
+const ON_PATH = 0.008;
+export function cleanStroke(s) {
+  if (pointCount(s) < 3) return s;
+  return dropLate(dropLate(dropRepeats(s)));
+}
+
+function dropRepeats(s) {
+  const kept = [];
+  for (let i = 0; i < s.length; i += 3) {
+    const x = s[i], y = s[i + 1];
+    let dup = false;
+    for (let k = Math.max(0, kept.length - 18); k < kept.length && !dup; k += 3) {
+      dup = (kept[k] - x) ** 2 + (kept[k + 1] - y) ** 2 < NEAR2;
+    }
+    if (!dup) kept.push(x, y, s[i + 2]);
+  }
+  return kept;
+}
+
+function dropLate(s) {
+  const n = pointCount(s);
+  const kept = [];
+  for (let i = 0; i < n; i++) {
+    const x = s[i * 3], y = s[i * 3 + 1];
+    const m = kept.length / 3;
+    if (m >= 2 && i + 1 < n) {
+      const ax = kept[m * 3 - 6], ay = kept[m * 3 - 5], bx = kept[m * 3 - 3], by = kept[m * 3 - 2];
+      const nx = s[i * 3 + 3], ny = s[i * 3 + 4];
+      const back = (x - bx) * (bx - ax) + (y - by) * (by - ay) < 0;
+      const forward = (nx - bx) * (bx - ax) + (ny - by) * (by - ay) > 0;
+      if (back && forward && distToPath(x, y, kept, Math.max(0, m - 6), m - 1) < ON_PATH) continue;
+    }
+    kept.push(x, y, s[i * 3 + 2]);
+  }
+  return kept;
+}
+
+function distToPath(x, y, flat, from, to) {
+  let best = Infinity;
+  for (let k = from; k < to; k++) {
+    const ax = flat[k * 3], ay = flat[k * 3 + 1], bx = flat[k * 3 + 3], by = flat[k * 3 + 4];
+    const dx = bx - ax, dy = by - ay;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy || 1e-12)));
+    best = Math.min(best, Math.hypot(x - ax - t * dx, y - ay - t * dy));
+  }
+  return best;
+}
+
 // Turn a polyline into smooth quadratic segments through the midpoints.
 // Returns { start: [x, y], segs: [[cx, cy, x, y], ...] }.
 export function toQuads(s) {

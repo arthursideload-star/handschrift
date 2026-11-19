@@ -637,7 +637,7 @@ function remapIds(entries) {
  * @param bgPdf    Uint8Array background PDF with the template's MediaBox (or null to keep)
  * @param thumb    Uint8Array JPEG thumbnail (optional)
  */
-export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb) {
+export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb, opts = {}) {
   const scale = tpl.gnSize.w / tpl.pageMm.w; // GoodNotes units per mm
   const widthGN = pen.width * scale;
   const [r, g, b] = hexToRgb(pen.color).map((c) => c / 255);
@@ -721,7 +721,7 @@ export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb) {
     ev.data = rewriteElementList(ev.data, tpl.page.uuid, elements);
   }
   if (thumb && entries.some((e) => e.name === 'thumbnail.jpg')) set('thumbnail.jpg', thumb);
-  entries = remapIds(entries);
+  if (opts.remap !== false) entries = remapIds(entries);
   return writeZip(entries, 'application/octet-stream');
 }
 
@@ -774,6 +774,20 @@ export async function readNotebook(buffer) {
 /** Read back classic ballpoint strokes of every page (GoodNotes units) – used for checks/import. */
 export async function readStrokes(buffer) {
   return (await readNotebook(buffer)).pages;
+}
+
+/**
+ * Test set to find out which step GoodNotes rejects (each file adds one step):
+ * A = template only re-zipped, B = A + new ids, C = A + strokes, D = full export.
+ */
+export function diagnosticFiles(tpl, strokes, pen, bgPdf, thumb) {
+  const raw = tpl.entries.map((e) => ({ name: e.name, data: e.data }));
+  return [
+    ['A-nur-neu-verpackt', writeZip(raw, 'application/octet-stream')],
+    ['B-neue-IDs', writeZip(remapIds(raw), 'application/octet-stream')],
+    ['C-mit-Strichen', buildGoodnotes(tpl, strokes, pen, null, null, { remap: false })],
+    ['D-kompletter-Export', buildGoodnotes(tpl, strokes, pen, bgPdf, thumb)],
+  ];
 }
 
 export { UUID_RE };

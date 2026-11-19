@@ -1,6 +1,6 @@
 // "Meine Schrift": draw each character a few times with Apple Pencil / mouse.
 import { GROUPS, ALL_CHARS, HINTS } from './charset.js';
-import { simplify, roundStroke, toQuads } from './geom.js';
+import { simplify, roundStroke, toQuads, cleanStroke } from './geom.js';
 import { toast } from './util.js';
 
 // Visible glyph area in glyph units (baseline 0, cap line -1).
@@ -122,6 +122,7 @@ export function createEditor({ getFont, saveFont, onChange }) {
     const [x, y] = toGlyph(e);
     active = [x, y, pressureOf(e)];
     active.pointerId = e.pointerId;
+    active.t = e.timeStamp;
     draw();
   });
   pad.addEventListener('pointermove', (e) => {
@@ -129,6 +130,9 @@ export function createEditor({ getFont, saveFont, onChange }) {
     e.preventDefault();
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     for (const ev of evs.length ? evs : [e]) {
+      // iPad Safari repeats older coalesced points – only take newer ones.
+      if (ev.timeStamp <= active.t) continue;
+      active.t = ev.timeStamp;
       const [x, y] = toGlyph(ev);
       const n = active.length;
       if (Math.hypot(x - active[n - 3], y - active[n - 2]) < 0.004) continue;
@@ -138,7 +142,7 @@ export function createEditor({ getFont, saveFont, onChange }) {
   });
   const end = (e) => {
     if (!active || e.pointerId !== active.pointerId) return;
-    const s = roundStroke(simplify(active, 0.0035), 4);
+    const s = roundStroke(simplify(cleanStroke(active), 0.0035), 4);
     strokes.push(s);
     active = null;
     draw();
