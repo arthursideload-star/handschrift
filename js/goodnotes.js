@@ -337,12 +337,53 @@ function indexOfBytes(hay, needle) {
   return -1;
 }
 
+/** MediaBox (pt) of the first page; null for GoodNotes placeholder PDFs ("[0 0 0 0]"). */
 function pdfMediaBox(bytes) {
   const s = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 400000)));
-  const m = s.match(/\/MediaBox\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/);
+  const re = /\/MediaBox\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/g;
+  const m = re.exec(s);
   if (!m) return null;
   const [x0, y0, x1, y1] = m.slice(1).map(Number);
-  return { w: x1 - x0, h: y1 - y0 };
+  const w = Math.abs(x1 - x0), h = Math.abs(y1 - y0);
+  return w > 10 && h > 10 ? { w, h } : null;
+}
+
+const isPdf = (d) => d && d[0] === 0x25 && d[1] === 0x50 && d[2] === 0x44 && d[3] === 0x46; // %PDF
+
+/**
+ * Find the paper the page really shows. index.events.pb is an append-only log:
+ * paper records (type 2) name a background attachment (f4) and the size in
+ * GoodNotes units (f8); page records (type 54 = create, 3 = change paper) point
+ * at a paper (f3.f1). The last assignment for our page wins.
+ */
+function findPagePaper(eventsBytes, pageUuid) {
+  const papers = new Map();
+  let chosen = null, chosenAny = null;
+  const prefix = pageUuid.slice(0, 8);
+  for (const rec of splitDelimited(eventsBytes)) {
+    const f = decodeMsg(rec);
+    if (!f) continue;
+    for (const x of f) {
+      if (x.wt !== 2 || x.num === 1) continue;
+      const inner = decodeMsg(x.val);
+      if (!inner) continue;
+      if (x.num === 2) {
+        const id = fieldStr(inner, 2), att = fieldStr(inner, 4), size = field(inner, 8);
+        const sz = size && size.wt === 2 ? decodeMsg(size.val) : null;
+        const w = sz && field(sz, 1), h = sz && field(sz, 2);
+        if (id && att && w && h && w.wt === 5 && h.wt === 5) papers.set(id, { att, w: f32(w.val), h: f32(h.val) });
+      } else if (x.num === 54 || x.num === 3) {
+        const ref = field(inner, 3);
+        const refMsg = ref && ref.wt === 2 ? decodeMsg(ref.val) : null;
+        const paperId = refMsg && fieldStr(refMsg, 1);
+        if (!paperId) continue;
+        chosenAny = paperId;
+        if ((fieldStr(inner, 2) || '').startsWith(prefix)) chosen = paperId;
+      }
+    }
+  }
+  const p = papers.get(chosen || chosenAny);
+  return p && p.w > 10 && p.h > 10 ? p : null;
 }
 
 /** Read a .goodnotes notebook exported from the user's app and learn its structure. */
@@ -364,20 +405,35 @@ export async function analyzeTemplate(buffer) {
     .filter(Boolean)
     .map((f) => ({ uuid: fieldStr(f, 1), path: fieldStr(f, 2) }))
     .filter((a) => a.uuid && a.path && byName.has(a.path));
-  const pdfAtt = attachments.find((a) => {
-    const d = byName.get(a.path).data;
-    return d[0] === 0x25 && d[1] === 0x50 && d[2] === 0x44 && d[3] === 0x46; // %PDF
-  });
-  const box = pdfAtt ? pdfMediaBox(byName.get(pdfAtt.path).data) : null;
-  const ptSize = box || { w: 595.28, h: 841.89 };
-
   const page = pages[0];
+  // Background PDF + size: prefer what the page's paper record says, otherwise the
+  // first PDF attachment with a real MediaBox, otherwise A4.
+  const paper = findPagePaper(byName.get('index.events.pb').data, page.uuid);
+  let pdfAtt = null, ptSize = null;
+  if (paper) {
+    const a = attachments.find((x) => x.uuid === paper.att);
+    if (a && isPdf(byName.get(a.path).data)) pdfAtt = a;
+    ptSize = { w: paper.w / GN_PER_PT, h: paper.h / GN_PER_PT };
+  }
+  if (!pdfAtt) {
+    for (const a of attachments) {
+      const d = byName.get(a.path).data;
+      const box = isPdf(d) && pdfMediaBox(d);
+      if (box) {
+        pdfAtt = a;
+        if (!ptSize) ptSize = box;
+        break;
+      }
+    }
+  }
+  if (!ptSize) ptSize = { w: 595.28, h: 841.89 };
+
   const noteBytes = byName.get(page.path)?.data || new Uint8Array();
   const records = splitDelimited(noteBytes);
   const dataRecs = new Map();
   records.forEach((r, i) => {
     const d = parseStrokeData(r);
-    if (d && d.uuid) dataRecs.set(i, d);
+    if (d && d.uuid) dataRecs.set(i, { ...d, raw: r });
   });
   const strokeIds = new Set([...dataRecs.values()].map((d) => d.uuid));
   const kept = [];
@@ -430,7 +486,14 @@ export async function analyzeTemplate(buffer) {
     maxZ: maxZ || 3000000,
     usesElementIds,
     sample: sampleData
-      ? { tool: sampleData.tpl.tool, tail: sampleData.tpl.tail, width: sampleData.tpl.width, color: sampleData.color }
+      ? {
+          tool: sampleData.tpl.tool,
+          tail: sampleData.tpl.tail,
+          width: sampleData.tpl.width,
+          color: sampleData.color,
+          dataRaw: sampleData.raw,
+          metaRaw: sampleMeta ? sampleMeta.map((x) => x.raw) : null,
+        }
       : null,
     otherFormats: [...dataRecs.values()].filter((d) => d.tpl && d.tpl.fmt !== CLASSIC_FMT).map((d) => d.tpl.fmt),
   };
@@ -510,6 +573,29 @@ function rewriteElementList(eventsBytes, pageUuid, elements) {
   return joinDelimited(out);
 }
 
+/** Copy a decoded message, replacing fields via fns[num](field) → PB | null (drop). */
+function rewrite(fields, fns) {
+  const pb = new PB();
+  for (const x of fields) {
+    const fn = fns[x.num];
+    if (!fn) {
+      pb.raw(x.raw);
+      continue;
+    }
+    const out = fn(x);
+    if (out) pb.raw(out.finish());
+  }
+  return pb;
+}
+
+/** Clock message {f1 counter?, f2 random}: keep f1 as in the template, set f2. */
+function setClock(u8, value) {
+  const m = decodeMsg(u8) || [];
+  const pb = rewrite(m, { 2: () => new PB().uint(2, value) });
+  if (!field(m, 2)) pb.uint(2, value);
+  return pb;
+}
+
 // Give every exported notebook its own ids (keeps relations: same prefix → same new prefix).
 function remapIds(entries) {
   const map = new Map();
@@ -530,6 +616,10 @@ function remapIds(entries) {
       re.lastIndex = 0;
       data = null;
       while ((m = re.exec(s))) {
+        // Only whole id strings (protobuf length byte 36 before) and paths. Ids inside
+        // longer strings, e.g. GoodNotes paper names "AA27…_a4_2_2 - White", stay.
+        const before = m.index ? e.data[m.index - 1] : -1;
+        if (before !== 36 && before !== 0x2f) continue; // 36 = length byte, '/' = path "notes/<id>"
         if (!data) data = e.data.slice();
         const np = utf8.encode(mapPrefix(m[0].slice(0, 8)));
         data.set(np, m.index);
@@ -562,29 +652,56 @@ export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb) {
     const q = toQuads(pts);
     const id = uuidUpper();
     const r1 = rand32(), r2 = rand32();
-    const meta = new PB().str(1, id).msg(2, new PB().uint(1, 2).uint(2, r1));
-    if (tpl.usesElementIds) {
-      const elemId = uuidUpper();
-      meta.str(6, elemId);
-      elements.push([elemId, r1]);
+    const elemId = tpl.usesElementIds ? uuidUpper() : null;
+    if (elemId) elements.push([elemId, r1]);
+    const color = new PB();
+    [r, g, b, 1].forEach((v, k) => v && color.float(k + 1, v)); // proto3: zeros are omitted
+    const blob = appleLz4Encode(buildClassicTpl(tool, widthGN, q.start, q.segs, tail));
+    const sm = tpl.sample && tpl.sample.metaRaw;
+    const sd = tpl.sample && tpl.sample.dataRaw;
+    let meta, data;
+    if (sm && sd) {
+      // Clone the user's own stroke records and swap only ids, clocks, order, ink.
+      meta = rewrite(sm.map((r0) => decodeMsg(r0)[0]), {
+        1: () => new PB().str(1, id),
+        2: (x) => new PB().msg(2, setClock(x.val, r1)),
+        6: () => (elemId ? new PB().str(6, elemId) : null),
+        9: () => new PB().uint(9, ++z),
+      });
+      const outer = decodeMsg(sd);
+      const f7 = field(outer, 7);
+      const inner = rewrite(decodeMsg(f7.val), {
+        1: () => new PB().str(1, id),
+        2: () => new PB().bytes(2, blob),
+        4: () => new PB().msg(4, color),
+        6: () => new PB().str(6, ''),
+        7: (x) => {
+          const m = decodeMsg(x.val);
+          const c = field(m, 1);
+          return new PB().msg(7, rewrite(m, { 1: () => new PB().msg(1, setClock(c.val, r2)) }));
+        },
+        14: () => null,
+        15: (x) => new PB().msg(15, setClock(x.val, r1)),
+      });
+      data = rewrite(outer, { 7: () => new PB().msg(7, inner) }).finish();
+      meta = meta.finish();
+    } else {
+      const m = new PB().str(1, id).msg(2, new PB().uint(1, 2).uint(2, r1));
+      if (elemId) m.str(6, elemId);
+      meta = m.uint(8, tpl.deviceId).uint(9, ++z).uint(14, 5381).uint(16, tpl.version).finish();
+      const inner = new PB()
+        .str(1, id)
+        .bytes(2, blob)
+        .msg(4, color)
+        .str(6, '')
+        .msg(7, new PB().msg(1, new PB().uint(1, 2).uint(2, r2)))
+        .str(9, '')
+        .msg(15, new PB().uint(1, 2).uint(2, r1))
+        .str(20, '')
+        .uint(21, tpl.version);
+      data = new PB().msg(7, inner).finish();
     }
-    meta
-      .uint(8, tpl.deviceId)
-      .uint(9, ++z)
-      .uint(14, 5381)
-      .uint(16, tpl.version);
-    const color = new PB().float(1, r).float(2, g).float(3, b).float(4, 1);
-    const inner = new PB()
-      .str(1, id)
-      .bytes(2, appleLz4Encode(buildClassicTpl(tool, widthGN, q.start, q.segs, tail)))
-      .msg(4, color)
-      .str(6, '')
-      .msg(7, new PB().msg(1, new PB().uint(1, 2).uint(2, r2)))
-      .str(9, '')
-      .msg(15, new PB().uint(1, 2).uint(2, r1))
-      .str(20, '')
-      .uint(21, tpl.version);
-    records.push(meta.finish(), new PB().msg(7, inner).finish());
+    records.push(meta, data);
   }
 
   let entries = tpl.entries.map((e) => ({ name: e.name, data: e.data }));
@@ -624,7 +741,9 @@ export async function readNotebook(buffer) {
     .map((f) => ({ uuid: fieldStr(f, 1), path: fieldStr(f, 2) }))
     .filter((p) => p.uuid && p.path);
   let mediaBox = null;
-  if (byName.has('index.attachments.pb')) {
+  const paper = pages[0] && byName.has('index.events.pb') ? findPagePaper(byName.get('index.events.pb').data, pages[0].uuid) : null;
+  if (paper) mediaBox = { w: paper.w / GN_PER_PT, h: paper.h / GN_PER_PT };
+  else if (byName.has('index.attachments.pb')) {
     for (const r of splitDelimited(byName.get('index.attachments.pb').data)) {
       const f = decodeMsg(r);
       const path = f && fieldStr(f, 2);

@@ -6,6 +6,7 @@ import { penWidthAt } from './render.js';
 const enc = new TextEncoder();
 const MM = 72 / 25.4;
 const n = (v) => {
+  if (!Number.isFinite(v)) return '0'; // never emit NaN/Infinity (invalid PDF)
   const r = Math.round(v * 100) / 100;
   return Object.is(r, -0) ? '0' : String(r);
 };
@@ -118,7 +119,8 @@ export async function buildPdf(pages) {
     push('\nendobj\n');
   };
 
-  push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  // Binary marker must be raw bytes (TextEncoder would turn them into UTF-8).
+  push(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
   const kids = pages.map((_, i) => `${3 + i * 2} 0 R`).join(' ');
   const fontId = 3 + pages.length * 2;
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>');

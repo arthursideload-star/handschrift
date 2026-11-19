@@ -55,9 +55,37 @@ export async function deliverFiles(files) {
       }
     } catch (err) {
       if (err && err.name === 'AbortError') return 'aborted';
-      // fall through to download
+      // iPad/iPhone: building the file took too long, the tap "expired" and Safari
+      // refuses the share sheet. Offer a button – a fresh tap is allowed to share.
+      if (err && err.name === 'NotAllowedError') return shareOnTap(files);
     }
   }
+  return downloadFiles(files);
+}
+
+function shareOnTap(files) {
+  document.getElementById('share-ready')?.remove();
+  const btn = document.createElement('button');
+  btn.id = 'share-ready';
+  btn.type = 'button';
+  btn.textContent = files.length > 1 ? `📤 ${files.length} Dateien sichern / teilen` : `📤 ${files[0].name} sichern / teilen`;
+  btn.style.cssText =
+    'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:9999;padding:14px 22px;border:0;border-radius:14px;background:#0a84ff;color:#fff;font:600 16px system-ui;box-shadow:0 6px 24px rgba(0,0,0,.25)';
+  document.body.appendChild(btn);
+  return new Promise((resolve) => {
+    btn.onclick = async () => {
+      btn.remove();
+      try {
+        await navigator.share({ files });
+        resolve('shared');
+      } catch (err) {
+        resolve(err && err.name === 'AbortError' ? 'aborted' : downloadFiles(files));
+      }
+    };
+  });
+}
+
+async function downloadFiles(files) {
   for (const f of files) {
     const url = URL.createObjectURL(f);
     const a = document.createElement('a');
@@ -66,7 +94,7 @@ export async function deliverFiles(files) {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    setTimeout(() => URL.revokeObjectURL(url), 120000); // iOS Safari reads the blob lazily
     await new Promise((r) => setTimeout(r, 350));
   }
   return 'downloaded';
