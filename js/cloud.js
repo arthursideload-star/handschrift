@@ -478,6 +478,7 @@ const bind = {
         toast('Angemeldet ✓', 'ok');
       } catch (err) {
         say(authError(err), 'error');
+        if (/email not confirmed/i.test(String(err && err.message))) offerResend(msg, email);
       } finally {
         buttons.forEach((b) => (b.disabled = false));
       }
@@ -523,8 +524,25 @@ function appUrl() {
   return location.origin + location.pathname;
 }
 
+// "Email not confirmed": let people request the confirmation mail again.
+function offerResend(msg, email) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn small';
+  b.textContent = 'Bestätigungs-Mail nochmal senden';
+  b.onclick = async () => {
+    b.disabled = true;
+    const { error } = await sb.auth.resend({ type: 'signup', email, options: { emailRedirectTo: appUrl() } });
+    msg.textContent = error ? authError(error) : 'Neue Mail ist unterwegs – schau auch im Spam-Ordner nach.';
+    msg.dataset.kind = error ? 'error' : 'ok';
+  };
+  msg.append(' ', b);
+}
+
 function authError(err) {
   const m = String((err && err.message) || err);
+  if (/not authorized|email_address_not_authorized/i.test(m)) return 'An diese E-Mail-Adresse kann gerade keine Mail geschickt werden (E-Mail-Versand noch nicht eingerichtet).';
+  if (/email rate limit/i.test(m)) return 'Gerade wurden zu viele E-Mails verschickt – bitte in einer Stunde nochmal probieren.';
   if (/invalid login credentials/i.test(m)) return 'E-Mail oder Passwort stimmt nicht.';
   if (/email not confirmed/i.test(m)) return 'Bitte bestätige zuerst deine E-Mail (Link in der Mail).';
   if (/already registered|already been registered/i.test(m)) return 'Für diese E-Mail gibt es schon ein Konto – melde dich an.';
