@@ -465,9 +465,17 @@ const bind = {
       try {
         if (action === 'signup') {
           const { data, error } = await sb.auth.signUp({ email, password, options: { emailRedirectTo: appUrl() } });
-          if (error) throw error;
-          if (!data.session) {
-            say('Fast geschafft! Wir haben dir eine E-Mail geschickt. Klick auf den Link darin und melde dich danach hier an.', 'ok');
+          if (error || !data.session) {
+            // Accounts are auto-confirmed server-side (trigger), so signing in right away
+            // works even if the confirmation mail could not be sent.
+            const { error: signInErr } = await sb.auth.signInWithPassword({ email, password });
+            if (signInErr) {
+              if (error) throw error;
+              say('Fast geschafft! Wir haben dir eine E-Mail geschickt. Klick auf den Link darin und melde dich danach hier an.', 'ok');
+              return;
+            }
+            dlg.close();
+            toast('Konto erstellt ✓', 'ok');
             return;
           }
         } else {

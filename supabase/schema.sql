@@ -68,3 +68,36 @@ alter table public.fonts
 alter default privileges in schema public revoke all on tables from anon, authenticated;
 alter default privileges in schema public revoke all on functions from anon, authenticated, public;
 alter default privileges in schema public revoke all on sequences from anon, authenticated;
+
+-- TEMPORARY (migration "auto_confirm_signups_until_smtp"): the project uses Supabase's
+-- built-in SMTP, which only delivers to org team members and is heavily rate limited, so
+-- confirmation mails never reach real users. Until custom SMTP is configured (Auth >
+-- SMTP Settings), every new user is confirmed automatically. REMOVE this trigger (and
+-- re-enable normal email confirmation) once custom SMTP works:
+--   drop trigger auto_confirm_user on auth.users;
+--   drop function private.auto_confirm_user();
+create schema if not exists private;
+revoke all on schema private from public, anon, authenticated;
+
+create or replace function private.auto_confirm_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if new.email_confirmed_at is null then
+    new.email_confirmed_at := now();
+  end if;
+  return new;
+end;
+$$;
+revoke execute on function private.auto_confirm_user() from public, anon, authenticated;
+
+drop trigger if exists auto_confirm_user on auth.users;
+create trigger auto_confirm_user
+  before insert on auth.users
+  for each row execute function private.auto_confirm_user();
+
+-- confirm users that signed up before the trigger existed
+update auth.users set email_confirmed_at = now() where email_confirmed_at is null;
