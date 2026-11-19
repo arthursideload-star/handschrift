@@ -109,6 +109,10 @@ summary::-webkit-details-marker { display: none; }
 .segmented button { flex: 1; border: 0; background: transparent; min-height: 34px; border-radius: 8px; font-weight: 600; cursor: pointer; color: #4b5161; }
 .segmented button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 
+.presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.presets button { border: 1px solid #e0dccf; background: #fff; min-height: 34px; border-radius: 8px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; color: #4b5161; padding: 0 2px; }
+.presets button.on { border-color: var(--accent); outline: 1px solid var(--accent); color: var(--ink); }
+
 /* ------------------------------------------------------------ preview */
 .preview-col { min-width: 0; }
 .preview-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }

@@ -16,7 +16,8 @@ const DEFAULTS = {
   orientation: 'hoch',
   penType: 'ballpoint',
   inkColor: '#1f2f6b',
-  penWidth: 0.45,
+  penWidth: 0.3, // mm, full line diameter (GoodNotes "Dicke")
+  penWidthV: 2, // settings migration marker
   size: 100,
   messiness: 35,
   slant: 0,
@@ -26,6 +27,16 @@ const DEFAULTS = {
   seed: 12345,
   stripMd: true,
   keepGnBackground: false,
+};
+
+// GoodNotes-like pen thicknesses in mm (GoodNotes' slider runs from about 0.1 to 2.0 mm).
+const PEN_WIDTHS = [0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1, 1.5, 2];
+const PEN_MIN = 0.1;
+const PEN_MAX = 2;
+const fmtMm = (v) => `${(Math.round(v * 100) / 100).toString().replace('.', ',')} mm`;
+const clampPenWidth = (v) => {
+  v = Number(v);
+  return Number.isFinite(v) ? Math.min(PEN_MAX, Math.max(PEN_MIN, Math.round(v * 100) / 100)) : DEFAULTS.penWidth;
 };
 
 const INK_SWATCHES = [
@@ -55,6 +66,12 @@ async function init() {
     if (font && font.glyphs) state.font = font;
     if (settings) state.settings = { ...DEFAULTS, ...settings };
     state.settings.paper = LEGACY_PAPERS[state.settings.paper] || state.settings.paper;
+    // Settings saved before the GoodNotes thickness presets: the old default 0.45 mm looked too fat.
+    if (!settings || settings.penWidthV !== 2) {
+      if (!settings || settings.penWidth === 0.45) state.settings.penWidth = DEFAULTS.penWidth;
+      state.settings.penWidthV = 2;
+    }
+    state.settings.penWidth = clampPenWidth(state.settings.penWidth);
     if (!PAPERS[state.settings.paper]) state.settings.paper = DEFAULTS.paper;
     if (!PAGE_SIZES[state.settings.pageFormat] && state.settings.pageFormat !== 'vorlage') state.settings.pageFormat = DEFAULTS.pageFormat;
     if (tpl && tpl.buffer) {
@@ -197,8 +214,18 @@ function buildSettingsUi() {
     if (b) update({ orientation: b.dataset.v });
   };
 
+  $('set-width-presets').innerHTML = PEN_WIDTHS.map((w) => `<button type="button" data-v="${w}" title="${fmtMm(w)}">${String(w).replace('.', ',')}</button>`).join('');
+  $('set-width-presets').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const w = Number(b.dataset.v);
+    $('set-width').value = w;
+    $('set-width').parentElement.querySelector('output').textContent = fmtMm(w);
+    update({ penWidth: w });
+  };
+
   const ranges = [
-    ['set-width', 'penWidth', (v) => `${v.toFixed(2).replace('.', ',')} mm`],
+    ['set-width', 'penWidth', fmtMm],
     ['set-size', 'size', (v) => `${v} %`],
     ['set-mess', 'messiness', (v) => `${v} %`],
     ['set-slant', 'slant', (v) => `${v}°`],
@@ -229,6 +256,7 @@ function syncSettingsUi() {
   document.querySelectorAll('#set-paper-color button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.paperColor));
   document.querySelectorAll('#set-ink button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.inkColor));
   document.querySelectorAll('#set-pen button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.penType));
+  document.querySelectorAll('#set-width-presets button').forEach((b) => b.classList.toggle('on', Math.abs(Number(b.dataset.v) - s.penWidth) < 0.001));
   const fmt = $('set-format');
   fmt.querySelector('option[value="vorlage"]').disabled = !state.gnTemplate;
   if (!state.gnTemplate && s.pageFormat === 'vorlage') s.pageFormat = DEFAULTS.pageFormat;
@@ -274,7 +302,7 @@ function compute() {
   });
   res.page = page;
   res.paper = paperOps(s.paper, s.paperColor, page, s.lineSpacing || 0);
-  res.pen = { type: s.penType, color: s.inkColor, width: s.penWidth };
+  res.pen = { type: s.penType, color: s.inkColor, width: clampPenWidth(s.penWidth) };
   res.text = text;
   return res;
 }

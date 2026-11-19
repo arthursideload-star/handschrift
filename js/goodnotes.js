@@ -639,6 +639,9 @@ function remapIds(entries) {
  */
 export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb, opts = {}) {
   const scale = tpl.gnSize.w / tpl.pageMm.w; // GoodNotes units per mm
+  // TPL width = full line diameter in GoodNotes units. Evidence: the user's own ballpoint sample
+  // stores 3.118 = 0.600 mm × (132/25.4) exactly (and kaih1825/parser-for-goodnotes also treats it as
+  // diameter: radius = width / 2). Same mm value as preview (render.js) and PDF (pdf.js).
   const widthGN = pen.width * scale;
   const [r, g, b] = hexToRgb(pen.color).map((c) => c / 255);
   const tool = tpl.sample ? tpl.sample.tool : 2;
