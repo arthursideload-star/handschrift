@@ -26,7 +26,23 @@ export function drawPaper(ctx, paper, scale) {
   }
 }
 
+// Strokes may carry their own colour (`stroke.color`, e.g. mind map branches);
+// everything else uses the pen colour.
+export function groupByColor(strokes, fallback) {
+  const groups = new Map();
+  for (const s of strokes) {
+    const c = s.color || fallback;
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c).push(s);
+  }
+  return groups;
+}
+
 export function drawStrokes(ctx, strokes, pen, scale) {
+  for (const [color, list] of groupByColor(strokes, pen.color)) drawInk(ctx, list, { ...pen, color }, scale);
+}
+
+function drawInk(ctx, strokes, pen, scale) {
   ctx.fillStyle = pen.color;
   ctx.strokeStyle = pen.color;
   if (pen.type === 'fountain') {

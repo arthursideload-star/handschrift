@@ -5,7 +5,10 @@ Getippten Text in die **eigene Handschrift** umwandeln – als Bild, PDF oder al
 ## So funktioniert's
 
 1. **Meine Schrift** – jedes Zeichen 3× mit Apple Pencil (oder Maus) auf die Hilfslinien schreiben. Gespeichert wird nur auf dem eigenen Gerät (IndexedDB). Über „Schrift sichern" als Datei sichern.
-2. **Schreiben** – Text eintippen oder aus ChatGPT einfügen, Papier/Stift/Unordentlichkeit einstellen, exportieren.
+2. **Schreiben** – Text eintippen oder aus ChatGPT einfügen, Papier/Stift/Unordentlichkeit einstellen, exportieren. Wie nah die Schrift am Seitenrand beginnt, stellt „Abstand zum Rand“ ein.
+   - **Zeitstrahl** – eine Zeile pro Ereignis (`1789: Sturm auf die Bastille`), optional mit Überschrift. Waagerecht (Querformat) oder senkrecht (Hochformat, geht bei vielen Ereignissen auf mehrere Seiten weiter).
+   - **Mindmap** – Stichpunkte, eingerückt = Unterpunkt; die erste Zeile kommt in die Mitte. Äste wahlweise bunt.
+   - Alles mit den eigenen Buchstaben, Linien und Pfeile von Hand gezeichnet – als Bild, PDF oder radierbar in GoodNotes.
 3. **GoodNotes** – einmal eine leere Notiz aus GoodNotes (mit einem Kugelschreiber-Strich) als `.goodnotes` exportieren und hier laden. Danach erzeugt „GoodNotes radierbar" echte Stiftstriche.
 
 Link mit vorausgefülltem Text: `…/#text=Dein%20Text` (der Text bleibt hinter dem `#` und wird nicht an einen Server geschickt).
@@ -14,6 +17,7 @@ Link mit vorausgefülltem Text: `…/#text=Dein%20Text` (der Text bleibt hinter 
 
 - Reines HTML/CSS/JS (ES-Module), kein Build-Schritt.
 - `js/layout.js` – Text → Glyphen mit Zufallsvariation (Variante, Größe, Drehung, Grundlinie, Wackeln, Zeilendrift).
+- `js/diagrams.js` – Zeitstrahl und Mindmap: Eingabe parsen, Beschriftung mit `layoutText`, handgezeichnete Linien/Ellipsen/Pfeile, automatisch auf die Seite eingepasst.
 - `js/pdf.js` – eigener Vektor-PDF-Writer.
 - `js/goodnotes.js` – `.goodnotes`-Writer: ZIP + Protobuf-Records, Striche als TPL-Punktbilder in Apple-LZ4-Rahmen. Formatwissen aus eigenen Analysen und dem MIT-lizenzierten Projekt [parser-for-goodnotes](https://github.com/Kaih1825/parser-for-goodnotes).
 

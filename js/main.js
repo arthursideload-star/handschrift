@@ -2,6 +2,7 @@ import * as store from './store.js';
 import { normalizeText, ALL_CHARS } from './charset.js';
 import { PAPERS, PAPER_COLORS, PAGE_SIZES, LEGACY_PAPERS, DEFAULT_MARGIN, paperGeometry, paperOps } from './paper.js';
 import { layoutText } from './layout.js';
+import { parseTimeline, parseMindmap, layoutTimeline, layoutMindmap } from './diagrams.js';
 import { renderPage } from './render.js';
 import { buildPdf, pageContent, PT_PER_MM } from './pdf.js';
 import { analyzeTemplate, buildGoodnotes, diagnosticFiles } from './goodnotes.js';
@@ -28,6 +29,46 @@ const DEFAULTS = {
   seed: 12345,
   stripMd: true,
   keepGnBackground: false,
+  // Zeitstrahl / Mindmap
+  timelineDir: 'auto',
+  timelineOrient: 'quer',
+  timelinePaper: 'leer',
+  timelineSize: 100,
+  timelineColor: true,
+  mindmapOrient: 'quer',
+  mindmapPaper: 'leer',
+  mindmapSize: 100,
+  mindmapColor: true,
+};
+
+const DIAGRAM_KINDS = ['timeline', 'mindmap'];
+const DIAGRAM_NAMES = { timeline: 'Zeitstrahl', mindmap: 'Mindmap' };
+const EXAMPLES = {
+  timelineTitle: 'Französische Revolution',
+  timeline: [
+    '1789: Sturm auf die Bastille',
+    '1791: Erste Verfassung Frankreichs',
+    '1793: Hinrichtung von Ludwig XVI.',
+    '1794: Ende der Schreckensherrschaft',
+    '1799: Napoleon übernimmt die Macht',
+  ].join('\n'),
+  mindmap: [
+    'Französische Revolution',
+    '- Ursachen',
+    '  - Hunger und hohe Brotpreise',
+    '  - Staatsschulden',
+    '  - Ständegesellschaft',
+    '- Verlauf',
+    '  - Sturm auf die Bastille',
+    '  - Erste Verfassung',
+    '  - Schreckensherrschaft',
+    '- Folgen',
+    '  - Menschenrechte',
+    '  - Ende des Absolutismus',
+    '- Personen',
+    '  - Robespierre',
+    '  - Napoleon',
+  ].join('\n'),
 };
 
 // GoodNotes-like pen thicknesses in mm (GoodNotes' slider runs from about 0.1 to 2.0 mm).
@@ -74,6 +115,7 @@ async function init() {
     }
     state.settings.penWidth = clampPenWidth(state.settings.penWidth);
     if (!PAPERS[state.settings.paper]) state.settings.paper = DEFAULTS.paper;
+    for (const k of DIAGRAM_KINDS) if (!PAPERS[state.settings[`${k}Paper`]]) state.settings[`${k}Paper`] = DEFAULTS[`${k}Paper`];
     if (!PAGE_SIZES[state.settings.pageFormat] && state.settings.pageFormat !== 'vorlage') state.settings.pageFormat = DEFAULTS.pageFormat;
     if (tpl && tpl.buffer) {
       try {
@@ -89,6 +131,7 @@ async function init() {
 
   buildSettingsUi();
   readIncomingText();
+  DIAGRAM_KINDS.forEach(initDiagramTab);
 
   const editor = createEditor({
     getFont: () => state.font,
@@ -123,9 +166,9 @@ async function init() {
     saveSettings();
     render();
   };
-  $('export-png').onclick = () => exportPng().catch(fail);
-  $('export-pdf').onclick = () => exportPdf().catch(fail);
-  $('export-gn').onclick = () => exportGoodnotes().catch(fail);
+  $('export-png').onclick = () => exportPng(compute, 'Handschrift').catch(fail);
+  $('export-pdf').onclick = () => exportPdf(compute, 'Handschrift').catch(fail);
+  $('export-gn').onclick = () => exportGoodnotes(writeForTemplate, 'Handschrift').catch(fail);
   $('gn-template').addEventListener('change', (e) => loadTemplate(e.target.files[0]).catch(fail));
   $('gn-template-remove').onclick = removeTemplate;
   $('gn-diag').onclick = () => exportDiagnostics().catch(fail);
@@ -133,7 +176,9 @@ async function init() {
   $('font-import').addEventListener('change', (e) => importFont(e.target.files[0]).catch(fail));
   $('font-reset').onclick = resetFont;
 
-  new ResizeObserver(debounce(render, 150)).observe($('pages'));
+  const onResize = debounce(render, 150);
+  new ResizeObserver(onResize).observe($('pages'));
+  DIAGRAM_KINDS.forEach((k) => new ResizeObserver(onResize).observe(section(k).querySelector('.pages')));
   renderTemplateInfo();
   render();
   store.requestPersistence();
@@ -149,7 +194,7 @@ function showTab(name) {
   document.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.id === `tab-${name}`));
   if (name === 'font') state.editor.show();
-  if (name === 'write') render();
+  if (name === 'write' || DIAGRAM_KINDS.includes(name)) render();
 }
 
 function readIncomingText() {
@@ -267,6 +312,15 @@ function syncSettingsUi() {
     b.classList.toggle('on', b.dataset.v === s.orientation);
     b.disabled = s.pageFormat === 'vorlage';
   });
+  for (const k of DIAGRAM_KINDS) {
+    document.querySelectorAll(`#${k}-orient button`).forEach((b) => {
+      b.classList.toggle('on', b.dataset.v === s[`${k}Orient`]);
+      b.disabled = s.pageFormat === 'vorlage';
+    });
+    $(`${k}-paper`).value = s[`${k}Paper`];
+    $(`${k}-color`).checked = !!s[`${k}Color`];
+  }
+  document.querySelectorAll('#timeline-dir button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.timelineDir));
 }
 
 const saveSettings = debounce(() => store.set('settings', state.settings).catch(() => {}), 300);
@@ -312,10 +366,19 @@ function compute() {
 const scheduleRender = debounce(() => render(), 90);
 
 function render() {
-  if (!$('tab-write').classList.contains('active')) return;
+  if ($('tab-write').classList.contains('active')) return renderWrite();
+  for (const k of DIAGRAM_KINDS) if (section(k).classList.contains('active')) return renderDiagram(k);
+}
+
+function renderWrite() {
   const res = compute();
   state.result = res;
-  const wrap = $('pages');
+  showPages($('pages'), res);
+  $('page-info').textContent = `${res.pages.length} Seite${res.pages.length === 1 ? '' : 'n'}`;
+  showMissing($('missing'), res);
+}
+
+function showPages(wrap, res) {
   const width = Math.max(240, wrap.clientWidth - 2);
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const pxPerMm = (width * dpr) / res.page.w;
@@ -331,12 +394,10 @@ function render() {
     c.style.width = `${width}px`;
   });
   canvases.slice(res.pages.length).forEach((c) => c.remove());
+}
 
+function showMissing(miss, res) {
   const glyphCount = Object.keys(state.font.glyphs).length;
-  const info = [];
-  info.push(`${res.pages.length} Seite${res.pages.length === 1 ? '' : 'n'}`);
-  $('page-info').textContent = info.join(' · ');
-  const miss = $('missing');
   if (!glyphCount) {
     miss.hidden = false;
     miss.innerHTML = `Du hast noch keine Buchstaben gezeichnet. <button type="button" class="link" data-go="font">Jetzt deine Schrift anlegen →</button>`;
@@ -372,20 +433,20 @@ function ensureContent(res) {
 // ------------------------------------------------------------------ exports
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 
-async function exportPng() {
-  const res = compute();
+async function exportPng(computeFn, name) {
+  const res = computeFn();
   ensureContent(res);
   const files = [];
   for (let i = 0; i < res.pages.length; i++) {
     const c = renderPage(document.createElement('canvas'), res.pages[i], res.paper, res.pen, res.page, 8);
     const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
-    files.push(new File([blob], `Handschrift-${stamp()}-${i + 1}.png`, { type: 'image/png' }));
+    files.push(new File([blob], `${name}-${stamp()}-${i + 1}.png`, { type: 'image/png' }));
   }
   await deliverFiles(files);
 }
 
-async function exportPdf() {
-  const res = compute();
+async function exportPdf(computeFn, name) {
+  const res = computeFn();
   ensureContent(res);
   const pages = res.pages.map((p) => ({
     wPt: res.page.w * PT_PER_MM,
@@ -393,20 +454,25 @@ async function exportPdf() {
     content: pageContent({ pageMm: res.page, paper: res.paper, strokes: p.strokes, pen: res.pen }),
   }));
   const bytes = await buildPdf(pages);
-  await deliverFiles([new File([bytes], `Handschrift-${stamp()}.pdf`, { type: 'application/pdf' })]);
+  await deliverFiles([new File([bytes], `${name}-${stamp()}.pdf`, { type: 'application/pdf' })]);
 }
 
-async function exportGoodnotes() {
+// "Schreiben" for GoodNotes: the page must have the template's size.
+function writeForTemplate() {
+  if (state.settings.pageFormat !== 'vorlage') {
+    update({ pageFormat: 'vorlage' });
+    toast('Seitenformat an deine GoodNotes-Vorlage angepasst.');
+  }
+  return compute();
+}
+
+async function exportGoodnotes(computeFn, name) {
   if (!state.gnTemplate) {
     showTab('gn');
     toast('Für den radierbaren Export brauchst du einmal eine GoodNotes-Vorlage.');
     return;
   }
-  if (state.settings.pageFormat !== 'vorlage') {
-    update({ pageFormat: 'vorlage' });
-    toast('Seitenformat an deine GoodNotes-Vorlage angepasst.');
-  }
-  const res = compute();
+  const res = computeFn();
   ensureContent(res);
   const tpl = state.gnTemplate;
   const files = [];
@@ -424,7 +490,7 @@ async function exportGoodnotes() {
     const thumbCanvas = renderPage(document.createElement('canvas'), res.pages[i], res.paper, res.pen, res.page, 1.6);
     const thumb = new Uint8Array(await (await new Promise((r) => thumbCanvas.toBlob(r, 'image/jpeg', 0.8))).arrayBuffer());
     const blob = buildGoodnotes(tpl, res.pages[i].strokes, res.pen, bg, thumb);
-    files.push(new File([blob], `Handschrift-${stamp()}-${i + 1}.goodnotes`, { type: 'application/octet-stream' }));
+    files.push(new File([blob], `${name}-${stamp()}-${i + 1}.goodnotes`, { type: 'application/octet-stream' }));
   }
   await deliverFiles(files);
   toast(
@@ -451,6 +517,130 @@ async function exportDiagnostics() {
     ([name, blob]) => new File([blob], `Test-${name}.goodnotes`, { type: 'application/octet-stream' }),
   );
   await deliverFiles(files);
+}
+
+// ------------------------------------------------------------------ Zeitstrahl + Mindmap
+const section = (kind) => $(`tab-${kind}`);
+const textKey = (kind) => `handschrift.${kind}`;
+
+function initDiagramTab(kind) {
+  const sec = section(kind);
+  const s = state.settings;
+  const ta = $(`${kind}-text`);
+  const titleEl = kind === 'timeline' ? $('timeline-title') : null;
+  ta.value = localStorage.getItem(textKey(kind)) ?? EXAMPLES[kind];
+  if (titleEl) titleEl.value = localStorage.getItem(textKey('timeline.title')) ?? EXAMPLES.timelineTitle;
+  const changed = () => {
+    localStorage.setItem(textKey(kind), ta.value);
+    if (titleEl) localStorage.setItem(textKey('timeline.title'), titleEl.value);
+    scheduleRender();
+  };
+  ta.addEventListener('input', changed);
+  if (titleEl) titleEl.addEventListener('input', changed);
+
+  sec.querySelector('[data-paste]').onclick = async () => {
+    try {
+      ta.value = await navigator.clipboard.readText();
+      changed();
+    } catch (_) {
+      toast('Einfügen nicht erlaubt – halte ins Textfeld gedrückt und wähle „Einsetzen“.');
+    }
+  };
+  sec.querySelector('[data-clear]').onclick = () => {
+    ta.value = '';
+    if (titleEl) titleEl.value = '';
+    changed();
+    ta.focus();
+  };
+  sec.querySelector('[data-example]').onclick = () => {
+    ta.value = EXAMPLES[kind];
+    if (titleEl) titleEl.value = EXAMPLES.timelineTitle;
+    changed();
+  };
+
+  const paper = $(`${kind}-paper`);
+  paper.innerHTML = Object.entries(PAPERS)
+    .filter(([, v]) => !v.hidden)
+    .map(([k, v]) => `<option value="${k}">${v.name}</option>`)
+    .join('');
+  paper.onchange = () => update({ [`${kind}Paper`]: paper.value });
+  $(`${kind}-orient`).onclick = (e) => {
+    const b = e.target.closest('button');
+    if (b && !b.disabled) update({ [`${kind}Orient`]: b.dataset.v });
+  };
+  if (kind === 'timeline') {
+    $('timeline-dir').onclick = (e) => {
+      const b = e.target.closest('button');
+      if (b) update({ timelineDir: b.dataset.v });
+    };
+  }
+  const size = $(`${kind}-size`);
+  const out = size.parentElement.querySelector('output');
+  size.value = s[`${kind}Size`];
+  out.textContent = `${size.value} %`;
+  size.addEventListener('input', () => {
+    out.textContent = `${size.value} %`;
+    update({ [`${kind}Size`]: Number(size.value) }, true);
+  });
+  $(`${kind}-color`).onchange = (e) => update({ [`${kind}Color`]: e.target.checked });
+  sec.querySelector('[data-reroll]').onclick = () => {
+    state.settings.seed = randomSeed();
+    saveSettings();
+    render();
+  };
+
+  const name = DIAGRAM_NAMES[kind];
+  sec.querySelector('[data-export="png"]').onclick = () => exportPng(() => computeDiagram(kind), name).catch(fail);
+  sec.querySelector('[data-export="pdf"]').onclick = () => exportPdf(() => computeDiagram(kind), name).catch(fail);
+  sec.querySelector('[data-export="gn"]').onclick = () => exportGoodnotes(() => computeDiagram(kind, true), name).catch(fail);
+}
+
+function diagramPage(kind, forTemplate) {
+  const s = state.settings;
+  if (state.gnTemplate && (forTemplate || s.pageFormat === 'vorlage')) return state.gnTemplate.pageMm;
+  const sz = PAGE_SIZES[s.pageFormat] || PAGE_SIZES.a4;
+  return s[`${kind}Orient`] === 'quer' ? { w: sz.h, h: sz.w } : { w: sz.w, h: sz.h };
+}
+
+function computeDiagram(kind, forTemplate = false) {
+  const s = state.settings;
+  const page = diagramPage(kind, forTemplate);
+  const raw = $(`${kind}-text`).value;
+  const o = {
+    page,
+    margin: s.margin,
+    cap: 5 * (s[`${kind}Size`] / 100),
+    colorful: !!s[`${kind}Color`],
+    messiness: s.messiness / 100,
+    slant: s.slant,
+    letterSpacing: s.letterSpacing / 100,
+    wordSpacing: s.wordSpacing / 100,
+    seed: s.seed,
+  };
+  let res;
+  if (kind === 'timeline') {
+    const title = $('timeline-title').value;
+    res = layoutTimeline(parseTimeline(raw), state.font, { ...o, title, direction: s.timelineDir });
+    res.text = raw + title;
+  } else {
+    res = layoutMindmap(parseMindmap(raw), state.font, o);
+    res.text = raw;
+  }
+  if (!res.pages.length) res.pages = [{ strokes: [] }];
+  res.page = page;
+  res.paper = paperOps(s[`${kind}Paper`], s.paperColor, page, 0, s.margin);
+  res.pen = { type: s.penType, color: s.inkColor, width: clampPenWidth(s.penWidth) };
+  return res;
+}
+
+function renderDiagram(kind) {
+  const sec = section(kind);
+  const res = computeDiagram(kind);
+  showPages(sec.querySelector('.pages'), res);
+  const info = [`${res.pages.length} Seite${res.pages.length === 1 ? '' : 'n'}`];
+  if (res.shrunk) info.push('Schrift verkleinert, damit alles draufpasst');
+  sec.querySelector('.page-info').textContent = info.join(' · ');
+  showMissing(sec.querySelector('.missing'), res);
 }
 
 // ------------------------------------------------------------------ GoodNotes template

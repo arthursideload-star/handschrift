@@ -21,7 +21,8 @@ const DEG = Math.PI / 180;
  * @param {string} text  normalised text
  * @param {object} font  { glyphs: { [char]: [{ s: number[][] }] } }
  * @param {object} o     { page:{w,h}, geo:{spacing,left,right,bottom,firstBaseline},
- *                         capHeight, messiness(0..1), slant(deg), letterSpacing, wordSpacing, seed }
+ *                         capHeight, messiness(0..1), slant(deg), letterSpacing, wordSpacing, seed,
+ *                         align?: 'left'|'center'|'right' (within geo.left..geo.right) }
  * @returns {{ pages: { strokes: number[][] }[], missing: Set<string>, lines: number }}
  */
 export function layoutText(text, font, o) {
@@ -141,11 +142,17 @@ export function layoutText(text, font, o) {
     const waveLen = 60 + rng() * 80;
     const phase = rng() * 6.283;
     const by = baselineY();
+    let shift = 0;
+    if (o.align === 'center' || o.align === 'right') {
+      const x1 = Math.max(...lineItems.map((it) => it.x1));
+      const free = o.geo.right - x1;
+      if (free > 0) shift = o.align === 'center' ? free / 2 - (lineItems[0].x0 - o.geo.left) / 2 : free;
+    }
     for (const it of lineItems) {
       for (const st of it.strokes) {
         const out = new Array(st.length);
         for (let i = 0; i < st.length; i += 3) {
-          const x = st[i] + it.x;
+          const x = st[i] + it.x + shift;
           const rel = x - o.geo.left;
           out[i] = x;
           out[i + 1] = st[i + 1] + by + slope * rel + waveAmp * Math.sin((rel / waveLen) * 6.283 + phase);
@@ -185,7 +192,7 @@ export function layoutText(text, font, o) {
           lineCount++;
           x = o.geo.left - it.shift - it.g.x0;
         }
-        lineItems.push({ strokes: it.g.strokes, x: x + it.shift });
+        lineItems.push({ strokes: it.g.strokes, x: x + it.shift, x0: x + it.shift + it.g.x0, x1: x + it.shift + it.g.x1 });
       }
       x += w.width;
       first = false;

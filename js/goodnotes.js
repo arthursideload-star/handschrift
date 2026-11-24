@@ -643,7 +643,8 @@ export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb, opts = {}) {
   // stores 3.118 = 0.600 mm × (132/25.4) exactly (and kaih1825/parser-for-goodnotes also treats it as
   // diameter: radius = width / 2). Same mm value as preview (render.js) and PDF (pdf.js).
   const widthGN = pen.width * scale;
-  const [r, g, b] = hexToRgb(pen.color).map((c) => c / 255);
+  const rgbOf = (hex) => hexToRgb(hex).map((c) => c / 255);
+  const penRgb = rgbOf(pen.color);
   const tool = tpl.sample ? tpl.sample.tool : 2;
   const tail = tpl.sample ? tpl.sample.tail : 1;
   const records = [...tpl.kept];
@@ -658,6 +659,7 @@ export function buildGoodnotes(tpl, strokes, pen, bgPdf, thumb, opts = {}) {
     const elemId = tpl.usesElementIds ? uuidUpper() : null;
     if (elemId) elements.push([elemId, r1]);
     const color = new PB();
+    const [r, g, b] = s.color ? rgbOf(s.color) : penRgb; // per-stroke colour (e.g. mind map branches)
     [r, g, b, 1].forEach((v, k) => v && color.float(k + 1, v)); // proto3: zeros are omitted
     const blob = appleLz4Encode(buildClassicTpl(tool, widthGN, q.start, q.segs, tail));
     const sm = tpl.sample && tpl.sample.metaRaw;

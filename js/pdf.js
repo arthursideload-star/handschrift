@@ -1,7 +1,7 @@
 // Minimal vector PDF writer (no dependencies).
 import { toQuads, ribbon } from './geom.js';
 import { hexToRgb } from './util.js';
-import { penWidthAt } from './render.js';
+import { penWidthAt, groupByColor } from './render.js';
 
 const enc = new TextEncoder();
 const MM = 72 / 25.4;
@@ -39,33 +39,39 @@ export function pageContent({ pageMm, paper, strokes, pen, includePaper = true, 
     }
   }
   if (includeInk && strokes && strokes.length) {
-    if (pen.type === 'fountain') {
-      const wAt = penWidthAt(pen);
-      out.push(`${rgb(pen.color)} rg`);
-      const parts = [];
-      for (const s of strokes) {
-        const poly = ribbon(s, wAt);
-        parts.push(poly.map(([x, y], i) => `${X(x)} ${Y(y)} ${i ? 'l' : 'm'}`).join(' ') + ' h');
-      }
-      out.push(parts.join('\n') + '\nf');
-    } else {
-      out.push(`${rgb(pen.color)} RG ${n(pen.width * MM)} w 1 J 1 j`);
-      const parts = [];
-      for (const s of strokes) {
-        const q = toQuads(s);
-        let [px, py] = q.start;
-        const seg = [`${X(px)} ${Y(py)} m`];
-        for (const [cx, cy, x, y] of q.segs) {
-          const c1x = px + (2 / 3) * (cx - px), c1y = py + (2 / 3) * (cy - py);
-          const c2x = x + (2 / 3) * (cx - x), c2y = y + (2 / 3) * (cy - y);
-          seg.push(`${X(c1x)} ${Y(c1y)} ${X(c2x)} ${Y(c2y)} ${X(x)} ${Y(y)} c`);
-          px = x;
-          py = y;
-        }
-        parts.push(seg.join(' '));
-      }
-      out.push(parts.join('\n') + '\nS');
+    for (const [color, list] of groupByColor(strokes, pen.color)) out.push(inkContent(list, { ...pen, color }, X, Y));
+  }
+  return out.join('\n');
+}
+
+function inkContent(strokes, pen, X, Y) {
+  const out = [];
+  if (pen.type === 'fountain') {
+    const wAt = penWidthAt(pen);
+    out.push(`${rgb(pen.color)} rg`);
+    const parts = [];
+    for (const s of strokes) {
+      const poly = ribbon(s, wAt);
+      parts.push(poly.map(([x, y], i) => `${X(x)} ${Y(y)} ${i ? 'l' : 'm'}`).join(' ') + ' h');
     }
+    out.push(parts.join('\n') + '\nf');
+  } else {
+    out.push(`${rgb(pen.color)} RG ${n(pen.width * MM)} w 1 J 1 j`);
+    const parts = [];
+    for (const s of strokes) {
+      const q = toQuads(s);
+      let [px, py] = q.start;
+      const seg = [`${X(px)} ${Y(py)} m`];
+      for (const [cx, cy, x, y] of q.segs) {
+        const c1x = px + (2 / 3) * (cx - px), c1y = py + (2 / 3) * (cy - py);
+        const c2x = x + (2 / 3) * (cx - x), c2y = y + (2 / 3) * (cy - y);
+        seg.push(`${X(c1x)} ${Y(c1y)} ${X(c2x)} ${Y(c2y)} ${X(x)} ${Y(y)} c`);
+        px = x;
+        py = y;
+      }
+      parts.push(seg.join(' '));
+    }
+    out.push(parts.join('\n') + '\nS');
   }
   return out.join('\n');
 }
