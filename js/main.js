@@ -1,6 +1,6 @@
 import * as store from './store.js';
 import { normalizeText, ALL_CHARS } from './charset.js';
-import { PAPERS, PAPER_COLORS, PAGE_SIZES, LEGACY_PAPERS, paperGeometry, paperOps } from './paper.js';
+import { PAPERS, PAPER_COLORS, PAGE_SIZES, LEGACY_PAPERS, DEFAULT_MARGIN, paperGeometry, paperOps } from './paper.js';
 import { layoutText } from './layout.js';
 import { renderPage } from './render.js';
 import { buildPdf, pageContent, PT_PER_MM } from './pdf.js';
@@ -24,6 +24,7 @@ const DEFAULTS = {
   letterSpacing: 100,
   wordSpacing: 100,
   lineSpacing: 0,
+  margin: DEFAULT_MARGIN, // mm from the page edge to the text
   seed: 12345,
   stripMd: true,
   keepGnBackground: false,
@@ -232,6 +233,7 @@ function buildSettingsUi() {
     ['set-letter', 'letterSpacing', (v) => `${v} %`],
     ['set-word', 'wordSpacing', (v) => `${v} %`],
     ['set-line', 'lineSpacing', (v) => (v ? `${String(v).replace('.', ',')} mm` : 'Auto')],
+    ['set-margin', 'margin', (v) => `${v} mm`],
   ];
   for (const [id, key, fmt] of ranges) {
     const el = $(id);
@@ -287,7 +289,7 @@ function pageSize() {
 function compute() {
   const s = state.settings;
   const page = pageSize();
-  const geo = paperGeometry(s.paper, page, s.lineSpacing || 0);
+  const geo = paperGeometry(s.paper, page, s.lineSpacing || 0, s.margin);
   const text = normalizeText($('text').value, { stripMd: s.stripMd });
   const capHeight = geo.spacing * 0.62 * (s.size / 100);
   const res = layoutText(text, state.font, {
@@ -301,7 +303,7 @@ function compute() {
     seed: s.seed,
   });
   res.page = page;
-  res.paper = paperOps(s.paper, s.paperColor, page, s.lineSpacing || 0);
+  res.paper = paperOps(s.paper, s.paperColor, page, s.lineSpacing || 0, s.margin);
   res.pen = { type: s.penType, color: s.inkColor, width: clampPenWidth(s.penWidth) };
   res.text = text;
   return res;

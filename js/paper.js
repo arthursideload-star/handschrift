@@ -42,27 +42,38 @@ export const PAPER_COLORS = {
 
 export const PAGE_A4 = { w: 210, h: 297 };
 
+// Default distance (mm) of the handwriting from the page edges. Small on purpose:
+// text that starts far inside the page has to be dragged to the edge in GoodNotes.
+export const DEFAULT_MARGIN = 8;
+
+// First ruled line. The paper keeps its header (like GoodNotes), but never more
+// than one line above the page margin, so the text can start near the top.
+function linesTop(def, spacing, margin) {
+  if (def.cornell) return def.top;
+  return Math.min(def.top, margin + spacing);
+}
+
 // Where text goes: baselines, margins.
-export function paperGeometry(paperKey, page, spacingOverride) {
+export function paperGeometry(paperKey, page, spacingOverride, margin = DEFAULT_MARGIN) {
   const def = PAPERS[paperKey] || PAPERS.liniert;
   const spacing = spacingOverride || def.spacing;
+  const m = Math.max(2, Number(margin) || DEFAULT_MARGIN);
   const g = {
     spacing,
-    left: def.marginLeft ? def.marginLeft + 3 : 14,
-    right: page.w - (def.marginRight ? def.marginRight + 3 : 14),
-    bottom: page.h - 14,
-    firstBaseline: 26,
+    left: def.marginLeft ? def.marginLeft + 3 : m,
+    right: page.w - (def.marginRight ? def.marginRight + 3 : m),
+    bottom: page.h - Math.max(6, m),
+    firstBaseline: m + spacing,
   };
   if (def.kind === 'lines') {
-    g.firstBaseline = def.top + (def.cornell ? 0 : spacing);
+    const top = linesTop(def, spacing, m);
+    g.firstBaseline = top + (def.cornell ? 0 : spacing);
     if (def.cornell) g.bottom = page.h - 62;
   } else if (def.kind === 'grid' || def.kind === 'dots') {
     const off = gridOffset(page, def.grid);
     let y = off.y;
-    while (y < 22) y += def.grid;
-    g.firstBaseline = y + def.grid;
-  } else {
-    g.firstBaseline = 30;
+    while (y < m + spacing * 0.7) y += def.grid;
+    g.firstBaseline = y;
   }
   return g;
 }
@@ -72,18 +83,19 @@ function gridOffset(page, step) {
 }
 
 // Drawing operations for the paper, shared by canvas preview and PDF export.
-export function paperOps(paperKey, colorKey, page, spacingOverride) {
+export function paperOps(paperKey, colorKey, page, spacingOverride, margin = DEFAULT_MARGIN) {
   const def = PAPERS[paperKey] || PAPERS.liniert;
   const col = PAPER_COLORS[colorKey] || PAPER_COLORS.weiss;
   const ops = [];
   const line = (x1, y1, x2, y2, color, width = 0.2) => ops.push({ t: 'line', x1, y1, x2, y2, color, width });
   if (def.kind === 'lines') {
     const spacing = spacingOverride || def.spacing;
-    for (let y = def.top; y <= page.h - 10; y += spacing) line(0, y, page.w, y, col.line, 0.22);
+    const top = linesTop(def, spacing, Math.max(2, Number(margin) || DEFAULT_MARGIN));
+    for (let y = top; y <= page.h - 10; y += spacing) line(0, y, page.w, y, col.line, 0.22);
     if (def.marginLeft) line(def.marginLeft, 0, def.marginLeft, page.h, col.margin, 0.3);
     if (def.marginRight) line(page.w - def.marginRight, 0, page.w - def.marginRight, page.h, col.margin, 0.3);
     if (def.cornell) {
-      line(0, def.top - spacing, page.w, def.top - spacing, col.margin, 0.3);
+      line(0, top - spacing, page.w, top - spacing, col.margin, 0.3);
       line(0, page.h - 55, page.w, page.h - 55, col.margin, 0.3);
     }
   } else if (def.kind === 'grid') {
