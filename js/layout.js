@@ -17,6 +17,41 @@ import { COMPOSE } from './charset.js';
 
 const DEG = Math.PI / 180;
 
+// ---- letter heights
+// Capitals, digits and ascender letters must stand clearly taller than "a, c, e, …".
+// Glyphs that were drawn too small (e.g. capitals as small as lower-case letters)
+// are enlarged at layout time, measured against the user's own x-height.
+const SMALL = 'acemnorsuvwxz';
+const TALL = new Set([...'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ0123456789bdhkl']);
+const MIN_TALL = 1.45; // tall glyph must be at least this × x-height …
+const TARGET_TALL = 1.75; // … otherwise it is enlarged to this × x-height
+const heightAbove = (strokes) => {
+  const bb = bbox(strokes);
+  return bb ? -bb.y0 : 0;
+};
+
+/** Median height of the user's small letters (glyph units), 0.5 if unknown. */
+export function xHeightOf(font) {
+  const hs = [];
+  for (const ch of SMALL) for (const v of font.glyphs[ch] || []) {
+    const h = heightAbove(clean(v.s));
+    if (h > 0.05) hs.push(h);
+  }
+  if (!hs.length) return 0.5;
+  hs.sort((a, b) => a - b);
+  return hs[Math.floor(hs.length / 2)];
+}
+
+/** Scale factor that makes a too-small tall glyph tall enough (1 = keep). */
+export function tallFix(ch, strokes, xh) {
+  if (!TALL.has(ch)) return 1;
+  const h = heightAbove(strokes);
+  if (h <= 0.05 || h >= xh * MIN_TALL) return 1;
+  return Math.min(2.2, (xh * TARGET_TALL) / h);
+}
+
+const scaleStrokes = (strokes, f) => (f === 1 ? strokes : strokes.map((st) => st.map((v, i) => (i % 3 === 2 ? v : v * f))));
+
 /**
  * @param {string} text  normalised text
  * @param {object} font  { glyphs: { [char]: [{ s: number[][] }] } }
@@ -32,6 +67,9 @@ export function layoutText(text, font, o) {
   const missing = new Set();
   const lastVariant = new Map();
   const slantTan = Math.tan((o.slant || 0) * DEG);
+  const xh = xHeightOf(font);
+  // how strongly line starts and word heights vary: 1 at the default messiness (35 %)
+  const vary = Math.min(1.8, m / 0.35) * (o.indentJitter ?? 1);
 
   const pages = [{ strokes: [] }];
   let page = pages[0];
@@ -65,17 +103,22 @@ export function layoutText(text, font, o) {
 
   function rawStrokesFor(ch) {
     const list = variantsFor(ch);
-    if (list) return clean(pickVariant(ch, list).s);
+    if (list) {
+      const st = clean(pickVariant(ch, list).s);
+      return scaleStrokes(st, tallFix(ch, st, xh));
+    }
     const comp = COMPOSE[ch];
     if (comp) {
       const base = variantsFor(comp[0]);
       const dots = variantsFor(comp[1]);
       if (base && dots) {
-        const b = clean(pickVariant(comp[0], base).s);
+        let b = clean(pickVariant(comp[0], base).s);
+        b = scaleStrokes(b, tallFix(comp[0], b, xh));
         const d = clean(pickVariant(comp[1], dots).s);
         const bb = bbox(b), db = bbox(d);
         const dx = (bb.x0 + bb.x1) / 2 - (db.x0 + db.x1) / 2;
-        const dy = comp[2];
+        // dots are drawn above a small letter; over a capital they go up by the height difference
+        const dy = comp[2] ? Math.min(0, bb.y0 + xh) : 0;
         const moved = d.map((s) => s.map((v, i) => (i % 3 === 0 ? v + dx : i % 3 === 1 ? v + dy : v)));
         return [...b, ...moved];
       }
@@ -116,6 +159,15 @@ export function layoutText(text, font, o) {
   // ---- words → glyph runs
   const letterGap = () => cap * (0.11 * (o.letterSpacing ?? 1) + (rng() - 0.5) * 0.06 * m);
   const spaceWidth = () => cap * 0.5 * (o.wordSpacing ?? 1) * (1 + (rng() - 0.5) * 0.35 * m);
+  // Every line starts a little left or right of the margin – a ruler along the
+  // line starts would give away that it's generated.
+  const lineStart = () => o.geo.left + (rng() - 0.4) * cap * 0.55 * vary;
+  // Words sit slightly higher or lower; now and then one jumps a bit more.
+  const wordShift = () => {
+    let d = (rng() - 0.5) * 2 * 0.045 * cap;
+    if (rng() < 0.22) d += (rng() < 0.5 ? -1 : 1) * (0.05 + 0.05 * rng()) * cap;
+    return d * vary;
+  };
 
   function buildWord(word) {
     const items = [];
@@ -155,7 +207,7 @@ export function layoutText(text, font, o) {
           const x = st[i] + it.x + shift;
           const rel = x - o.geo.left;
           out[i] = x;
-          out[i + 1] = st[i + 1] + by + slope * rel + waveAmp * Math.sin((rel / waveLen) * 6.283 + phase);
+          out[i + 1] = st[i + 1] + it.dy + by + slope * rel + waveAmp * Math.sin((rel / waveLen) * 6.283 + phase);
           out[i + 2] = st[i + 2];
         }
         page.strokes.push(out);
@@ -168,18 +220,19 @@ export function layoutText(text, font, o) {
   paragraphs.forEach((para, pi) => {
     if (pi > 0) newLine();
     lineCount++;
-    let x = o.geo.left + (rng() - 0.3) * cap * 0.15 * m;
+    let x = lineStart();
     const words = para.split(/ +/);
     let first = true;
     for (const word of words) {
       if (!word) continue;
       const w = buildWord(word);
+      const dy = wordShift();
       const gap = first ? 0 : spaceWidth();
       if (!first && x + gap + w.width > o.geo.right) {
         flushLine();
         newLine();
         lineCount++;
-        x = o.geo.left + (rng() - 0.3) * cap * 0.15 * m;
+        x = lineStart();
       } else {
         x += gap;
       }
@@ -192,7 +245,7 @@ export function layoutText(text, font, o) {
           lineCount++;
           x = o.geo.left - it.shift - it.g.x0;
         }
-        lineItems.push({ strokes: it.g.strokes, x: x + it.shift, x0: x + it.shift + it.g.x0, x1: x + it.shift + it.g.x1 });
+        lineItems.push({ strokes: it.g.strokes, dy, x: x + it.shift, x0: x + it.shift + it.g.x0, x1: x + it.shift + it.g.x1 });
       }
       x += w.width;
       first = false;

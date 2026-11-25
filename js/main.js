@@ -2,8 +2,9 @@ import * as store from './store.js';
 import { normalizeText, ALL_CHARS } from './charset.js';
 import { PAPERS, PAPER_COLORS, PAGE_SIZES, LEGACY_PAPERS, DEFAULT_MARGIN, paperGeometry, paperOps } from './paper.js';
 import { layoutText } from './layout.js';
-import { parseTimeline, parseMindmap, layoutTimeline, layoutMindmap } from './diagrams.js';
-import { renderPage } from './render.js';
+import { parseTimeline, parseMindmap, parseTable, layoutTimeline, layoutMindmap, layoutTable } from './diagrams.js';
+import { renderPage, drawStrokes } from './render.js';
+import { bbox } from './geom.js';
 import { buildPdf, pageContent, PT_PER_MM } from './pdf.js';
 import { analyzeTemplate, buildGoodnotes, diagnosticFiles } from './goodnotes.js';
 import { createEditor } from './editor.js';
@@ -39,11 +40,28 @@ const DEFAULTS = {
   mindmapPaper: 'leer',
   mindmapSize: 100,
   mindmapColor: true,
+  tableOrient: 'hoch',
+  tablePaper: 'leer',
+  tableSize: 100,
+  tableColor: true,
+  tableHeader: true,
 };
 
-const DIAGRAM_KINDS = ['timeline', 'mindmap'];
-const DIAGRAM_NAMES = { timeline: 'Zeitstrahl', mindmap: 'Mindmap' };
+// Shown next to the logo so you can see which version is running (keep in sync with sw.js).
+const APP_VERSION = 11;
+
+const DIAGRAM_KINDS = ['timeline', 'mindmap', 'table'];
+const DIAGRAM_NAMES = { timeline: 'Zeitstrahl', mindmap: 'Mindmap', table: 'Tabelle' };
 const EXAMPLES = {
+  tableTitle: 'Die Planeten',
+  table: [
+    'Planet | Abstand zur Sonne | Monde | Besonderheit',
+    'Merkur | 58 Mio. km | 0 | kleinster Planet',
+    'Venus | 108 Mio. km | 0 | heißester Planet',
+    'Erde | 150 Mio. km | 1 | flüssiges Wasser',
+    'Mars | 228 Mio. km | 2 | roter Planet',
+    'Jupiter | 778 Mio. km | 95 | größter Planet',
+  ].join('\n'),
   timelineTitle: 'Französische Revolution',
   timeline: [
     '1789: Sturm auf die Bastille',
@@ -129,6 +147,7 @@ async function init() {
     console.warn('Speicher nicht verfügbar', err);
   }
 
+  $('app-version').textContent = `Version ${APP_VERSION}`;
   buildSettingsUi();
   readIncomingText();
   DIAGRAM_KINDS.forEach(initDiagramTab);
@@ -168,6 +187,7 @@ async function init() {
   };
   $('export-png').onclick = () => exportPng(compute, 'Handschrift').catch(fail);
   $('export-pdf').onclick = () => exportPdf(compute, 'Handschrift').catch(fail);
+  $('export-cut').onclick = () => exportCutout(compute, 'Handschrift').catch(fail);
   $('export-gn').onclick = () => exportGoodnotes(writeForTemplate, 'Handschrift').catch(fail);
   $('gn-template').addEventListener('change', (e) => loadTemplate(e.target.files[0]).catch(fail));
   $('gn-template-remove').onclick = removeTemplate;
@@ -320,6 +340,7 @@ function syncSettingsUi() {
     $(`${k}-paper`).value = s[`${k}Paper`];
     $(`${k}-color`).checked = !!s[`${k}Color`];
   }
+  $('table-header').checked = !!s.tableHeader;
   document.querySelectorAll('#timeline-dir button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.timelineDir));
 }
 
@@ -445,6 +466,30 @@ async function exportPng(computeFn, name) {
   await deliverFiles(files);
 }
 
+// Transparent PNG with only the handwriting, cropped to it – pastes into a GoodNotes
+// page without a white paper block around it.
+async function exportCutout(computeFn, name) {
+  const res = computeFn();
+  ensureContent(res);
+  const files = [];
+  const px = 10; // px per mm
+  for (let i = 0; i < res.pages.length; i++) {
+    const strokes = res.pages[i].strokes;
+    const bb = bbox(strokes);
+    if (!bb) continue;
+    const pad = 1.5 + res.pen.width;
+    const c = document.createElement('canvas');
+    c.width = Math.ceil((bb.w + 2 * pad) * px);
+    c.height = Math.ceil((bb.h + 2 * pad) * px);
+    const ctx = c.getContext('2d');
+    ctx.translate((pad - bb.x0) * px, (pad - bb.y0) * px);
+    drawStrokes(ctx, strokes, res.pen, px);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    files.push(new File([blob], `${name}-Schrift-${stamp()}-${i + 1}.png`, { type: 'image/png' }));
+  }
+  await deliverFiles(files);
+}
+
 async function exportPdf(computeFn, name) {
   const res = computeFn();
   ensureContent(res);
@@ -527,12 +572,12 @@ function initDiagramTab(kind) {
   const sec = section(kind);
   const s = state.settings;
   const ta = $(`${kind}-text`);
-  const titleEl = kind === 'timeline' ? $('timeline-title') : null;
+  const titleEl = $(`${kind}-title`);
   ta.value = localStorage.getItem(textKey(kind)) ?? EXAMPLES[kind];
-  if (titleEl) titleEl.value = localStorage.getItem(textKey('timeline.title')) ?? EXAMPLES.timelineTitle;
+  if (titleEl) titleEl.value = localStorage.getItem(textKey(`${kind}.title`)) ?? EXAMPLES[`${kind}Title`];
   const changed = () => {
     localStorage.setItem(textKey(kind), ta.value);
-    if (titleEl) localStorage.setItem(textKey('timeline.title'), titleEl.value);
+    if (titleEl) localStorage.setItem(textKey(`${kind}.title`), titleEl.value);
     scheduleRender();
   };
   ta.addEventListener('input', changed);
@@ -554,7 +599,7 @@ function initDiagramTab(kind) {
   };
   sec.querySelector('[data-example]').onclick = () => {
     ta.value = EXAMPLES[kind];
-    if (titleEl) titleEl.value = EXAMPLES.timelineTitle;
+    if (titleEl) titleEl.value = EXAMPLES[`${kind}Title`];
     changed();
   };
 
@@ -583,6 +628,7 @@ function initDiagramTab(kind) {
     update({ [`${kind}Size`]: Number(size.value) }, true);
   });
   $(`${kind}-color`).onchange = (e) => update({ [`${kind}Color`]: e.target.checked });
+  if (kind === 'table') $('table-header').onchange = (e) => update({ tableHeader: e.target.checked });
   sec.querySelector('[data-reroll]').onclick = () => {
     state.settings.seed = randomSeed();
     saveSettings();
@@ -592,6 +638,7 @@ function initDiagramTab(kind) {
   const name = DIAGRAM_NAMES[kind];
   sec.querySelector('[data-export="png"]').onclick = () => exportPng(() => computeDiagram(kind), name).catch(fail);
   sec.querySelector('[data-export="pdf"]').onclick = () => exportPdf(() => computeDiagram(kind), name).catch(fail);
+  sec.querySelector('[data-export="cut"]').onclick = () => exportCutout(() => computeDiagram(kind), name).catch(fail);
   sec.querySelector('[data-export="gn"]').onclick = () => exportGoodnotes(() => computeDiagram(kind, true), name).catch(fail);
 }
 
@@ -621,6 +668,10 @@ function computeDiagram(kind, forTemplate = false) {
   if (kind === 'timeline') {
     const title = $('timeline-title').value;
     res = layoutTimeline(parseTimeline(raw), state.font, { ...o, title, direction: s.timelineDir });
+    res.text = raw + title;
+  } else if (kind === 'table') {
+    const title = $('table-title').value;
+    res = layoutTable(parseTable(raw), state.font, { ...o, title, header: s.tableHeader });
     res.text = raw + title;
   } else {
     res = layoutMindmap(parseMindmap(raw), state.font, o);
@@ -718,7 +769,22 @@ async function resetFont() {
 init();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Offline-Modus nicht verfügbar', err));
+  // A new version took over (e.g. the old cache-first worker was replaced): reload once
+  // so the page shows the new version right away instead of on the next visit.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  navigator.serviceWorker
+    .register('sw.js', { updateViaCache: 'none' })
+    .then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && reg.update().catch(() => {}));
+    })
+    .catch((err) => console.warn('Offline-Modus nicht verfügbar', err));
 }
 
 // Font replaced from outside the editor (e.g. GoodNotes Schreibblatt import in sheet-ui.js).

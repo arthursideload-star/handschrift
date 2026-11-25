@@ -145,6 +145,7 @@ function makeWriter(font, base) {
       wordSpacing: base.wordSpacing,
       seed: (base.seed + ++n * 7919) >>> 0,
       align,
+      indentJitter: 0.35, // labels: only a hint of the line-start wobble
     });
     res.missing.forEach((c) => missing.add(c));
     const strokes = res.pages.flatMap((p) => p.strokes);
@@ -546,4 +547,130 @@ function mindmapOnce(root, font, o, wf, oneSided, vg) {
 function setColor(node, color) {
   node.color = color;
   node.children.forEach((c) => setColor(c, color));
+}
+
+// ------------------------------------------------------------------ table
+
+/**
+ * Table input: one row per line. Cells separated by "|" (also Markdown tables from
+ * ChatGPT), tab or ";". A Markdown heading becomes the title.
+ * @returns {{ title: string, rows: string[][] }}
+ */
+export function parseTable(text) {
+  let title = '';
+  const rows = [];
+  for (const line of (text || '').replace(/\r\n?/g, '\n').split('\n')) {
+    if (!line.trim()) continue;
+    const h = line.match(/^\s*#{1,6}\s+(.+)$/);
+    if (h) {
+      if (!title) title = label(h[1]);
+      continue;
+    }
+    if (/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(line)) continue; // |---|---|
+    let cells;
+    if (line.includes('|')) cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+    else if (line.includes('\t')) cells = line.split('\t');
+    else if (line.includes(';')) cells = line.split(';');
+    else cells = [line];
+    rows.push(cells.map((c) => label(c)));
+  }
+  const cols = Math.max(0, ...rows.map((r) => r.length));
+  rows.forEach((r) => {
+    while (r.length < cols) r.push('');
+  });
+  return { title, rows };
+}
+
+/**
+ * @param data  result of parseTable (title may be overridden by o.title)
+ * @param o     { page, margin, cap, colorful, header (first row = heading row), … }
+ * @returns {{ pages: { strokes }[], missing: Set<string>, shrunk: boolean }}
+ */
+export function layoutTable(data, font, o) {
+  const title = o.title != null && o.title.trim() ? label(o.title) : data.title;
+  let cap = o.cap;
+  for (let i = 0; i < 12; i++) {
+    const res = tableOnce(title, data.rows, font, { ...o, cap });
+    if (res.fits || cap < 1.8) return { pages: res.pages, missing: res.missing, shrunk: cap < o.cap * 0.95 };
+    cap *= 0.9;
+  }
+  return { pages: [], missing: new Set(), shrunk: true };
+}
+
+function tableOnce(title, rows, font, o) {
+  const base = opts(o);
+  const W = makeWriter(font, base);
+  const rng = mulberry32((base.seed ^ 0x27d4eb2f) >>> 0);
+  const m = base.messiness;
+  const cap = o.cap;
+  const box = timelineBox(o);
+  const cw = box.right - box.left;
+  const accent = o.colorful ? PALETTE[1] : null;
+  const pages = [{ strokes: [] }];
+  let strokes = pages[0].strokes;
+  let y = writeTitle(title, W, box, cap, o.colorful ? PALETTE[0] : null, rng, m, strokes);
+  if (!rows.length) return { pages, missing: W.missing, fits: true };
+
+  const cols = rows[0].length;
+  const header = o.header !== false && rows.length > 1;
+  const capOf = (r) => (header && r === 0 ? cap * 1.05 : cap * 0.95);
+  const padX = cap * 0.6, padY = cap * 0.5;
+
+  // ---- column widths: natural (one line) and minimal (longest word) width
+  const nat = new Array(cols).fill(cap * 2), min = new Array(cols).fill(cap * 2);
+  rows.forEach((row, r) =>
+    row.forEach((cell, c) => {
+      if (!cell) return;
+      const one = W.block(cell, capOf(r), 1e6);
+      nat[c] = Math.max(nat[c], one.w + 2 * padX + cap * 0.3);
+      const longest = Math.max(0, ...cell.split(/\s+/).map((w) => W.block(w, capOf(r), 1e6).w));
+      min[c] = Math.max(min[c], longest + 2 * padX + cap * 0.3);
+    }),
+  );
+  const sumNat = nat.reduce((a, b) => a + b, 0), sumMin = min.reduce((a, b) => a + b, 0);
+  let widths;
+  if (sumMin > cw) widths = null; // does not fit: smaller writing
+  else if (sumNat <= cw) widths = nat.map((w) => w + ((cw - sumNat) * w) / sumNat); // fill the width
+  else {
+    const extra = sumNat - sumMin || 1;
+    widths = min.map((w, c) => w + ((cw - sumMin) * (nat[c] - min[c])) / extra);
+  }
+  if (!widths) return { pages, missing: W.missing, fits: false };
+  const xs = [box.left];
+  widths.forEach((w) => xs.push(xs[xs.length - 1] + w));
+
+  // ---- rows
+  const laid = rows.map((row, r) => {
+    const cells = row.map((cell, c) => W.block(cell, capOf(r), widths[c] - 2 * padX));
+    return { cells, h: Math.max(capOf(r) * 1.45, ...cells.map((b) => b.h)) + 2 * padY };
+  });
+  // a single row taller than a page cannot be split: shrink instead
+  if (laid.some((l) => l.h > box.bottom - box.top - cap * 4)) return { pages, missing: W.missing, fits: false };
+
+  let top = y; // top line of the table on this page
+  const hLine = (yy, color, mm = m) => strokes.push(paint([handPath([[xs[0], yy], [xs[cols], yy]], rng, mm * 0.6)], color)[0]);
+  const vLines = (y0, y1) => xs.forEach((x) => strokes.push(handPath([[x, y0], [x, y1]], rng, m * 0.5)));
+  const drawRow = (l, r) => {
+    l.cells.forEach((b, c) => {
+      const t = translate(b.strokes, xs[c] + padX, y + padY);
+      strokes.push(...(header && r === 0 ? paint(t, accent) : t));
+    });
+    y += l.h;
+    hLine(y, header && r === 0 ? accent : null);
+    if (header && r === 0) hLine(y + cap * 0.18, accent, 0.2); // double line under the heading row
+  };
+  hLine(top, null);
+  laid.forEach((l, r) => {
+    if (y + l.h > box.bottom && r > 0) {
+      vLines(top, y);
+      pages.push({ strokes: [] });
+      strokes = pages[pages.length - 1].strokes;
+      y = top = box.top;
+      hLine(top, null);
+      if (header && r > 0) drawRow(laid[0], 0); // repeat the heading row
+    }
+    drawRow(l, r);
+  });
+  vLines(top, y);
+  return { pages, missing: W.missing, fits: true };
 }

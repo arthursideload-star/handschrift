@@ -36,6 +36,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border-bottom: 1px solid var(--line);
 }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+.app-version { font-size: 11px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-left: 2px; }
 .brand svg { width: 26px; height: 26px; color: var(--accent); }
 .tabs { display: flex; gap: 4px; background: #e9e6dd; padding: 4px; border-radius: 999px; margin-left: auto; }
 .tabs button {

@@ -6,6 +6,9 @@ import { toast } from './util.js';
 // Visible glyph area in glyph units (baseline 0, cap line -1).
 const VIEW = { x0: -0.35, x1: 1.85, y0: -1.45, y1: 0.75 };
 const TARGET_VARIANTS = 3;
+// Characters that reach up to the top line (capitals, digits, ascenders) vs. small letters.
+const TALL = new Set([...'ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÜ0123456789bdfhklß']);
+const SMALL = new Set([...'acemnorsuvwxzäöü']);
 
 export function createEditor({ getFont, saveFont, onChange }) {
   const pad = document.getElementById('pad');
@@ -65,7 +68,17 @@ export function createEditor({ getFont, saveFont, onChange }) {
       ctx.stroke();
       ctx.restore();
     };
-    line(-1, '#c9d3df', 1.2);
+    // shade the zone the character should fill: tall ones up to the top line
+    const zone = TALL.has(current) ? -1 : SMALL.has(current) ? -0.5 : null;
+    if (zone != null) {
+      const [zx0, zy0] = toPx(VIEW.x0, zone, v);
+      const [zx1, zy1] = toPx(VIEW.x1, 0, v);
+      ctx.save();
+      ctx.fillStyle = zone === -1 ? 'rgba(43, 74, 203, 0.07)' : 'rgba(29, 122, 70, 0.07)';
+      ctx.fillRect(zx0, zy0, zx1 - zx0, zy1 - zy0);
+      ctx.restore();
+    }
+    line(-1, zone === -1 ? '#8fa3d9' : '#c9d3df', zone === -1 ? 2 : 1.2);
     line(-0.5, '#d6dde6', 1.2, [6, 6]);
     line(0, '#7f97b2', 2.2);
     line(0.5, '#d6dde6', 1.2, [2, 5]);
@@ -82,7 +95,15 @@ export function createEditor({ getFont, saveFont, onChange }) {
     // ghost of the character
     ctx.save();
     ctx.fillStyle = 'rgba(40, 60, 90, 0.06)';
-    ctx.font = `${v.s * 1.05}px "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive`;
+    const family = '"Segoe Print", "Bradley Hand", "Comic Sans MS", cursive';
+    let size = v.s * 1.05;
+    // size the example so it fills exactly the shaded zone (capitals up to the top line)
+    if (zone != null) {
+      ctx.font = `${size}px ${family}`;
+      const asc = ctx.measureText(current).actualBoundingBoxAscent;
+      if (asc > 0) size *= (-zone * v.s) / asc;
+    }
+    ctx.font = `${size}px ${family}`;
     ctx.textBaseline = 'alphabetic';
     const [tx, ty] = toPx(0.05, 0, v);
     ctx.fillText(current === '¨' ? '¨' : current, tx, ty);
@@ -198,7 +219,14 @@ export function createEditor({ getFont, saveFont, onChange }) {
     strokes = [];
     curEl.textContent = ch === ' ' ? '␣' : ch;
     hintEl.textContent =
-      HINTS[ch] || 'Schreib das Zeichen so, wie du es immer schreibst. Die dicke Linie ist die Grundlinie.';
+      HINTS[ch] ||
+      (/[A-ZÄÖÜ]/.test(ch)
+        ? 'Großbuchstabe: von der dicken Grundlinie bis ganz nach oben zur oberen Linie – deutlich größer als die Kleinbuchstaben.'
+        : TALL.has(ch)
+          ? 'Hohes Zeichen: von der Grundlinie bis zur oberen Linie.'
+          : SMALL.has(ch)
+            ? 'Kleinbuchstabe: zwischen der gestrichelten Mittellinie und der dicken Grundlinie.'
+            : 'Schreib das Zeichen so, wie du es immer schreibst. Die dicke Linie ist die Grundlinie.');
     renderVariants();
     renderCharset();
     draw();

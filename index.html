@@ -16,11 +16,12 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 23c4-1 6-7 9-11s6-6 8-4-2 6-5 8-6 4-3 5 6-3 9-3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Handschrift</div>
+    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 23c4-1 6-7 9-11s6-6 8-4-2 6-5 8-6 4-3 5 6-3 9-3" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Handschrift<span id="app-version" class="app-version"></span></div>
     <nav class="tabs" aria-label="Bereiche">
       <button type="button" data-tab="write">Schreiben</button>
       <button type="button" data-tab="timeline">Zeitstrahl</button>
       <button type="button" data-tab="mindmap">Mindmap</button>
+      <button type="button" data-tab="table">Tabelle</button>
       <button type="button" data-tab="font">Meine Schrift</button>
       <button type="button" data-tab="gn">GoodNotes</button>
     </nav>
@@ -101,6 +102,7 @@
             <span id="page-info" class="muted"></span>
             <div class="export">
               <button type="button" id="export-png" class="btn">Bild</button>
+              <button type="button" id="export-cut" class="btn" title="Durchsichtiges Bild nur mit der Schrift – zum Einfügen in eine GoodNotes-Seite">Nur Schrift</button>
               <button type="button" id="export-pdf" class="btn">PDF</button>
               <button type="button" id="export-gn" class="btn primary" title="Als GoodNotes-Datei – jeder Strich radierbar">GoodNotes <small>radierbar</small></button>
             </div>
@@ -162,6 +164,7 @@
             <span class="muted page-info"></span>
             <div class="export">
               <button type="button" class="btn" data-export="png">Bild</button>
+              <button type="button" class="btn" data-export="cut" title="Durchsichtiges Bild nur mit der Schrift – zum Einfügen in eine GoodNotes-Seite">Nur Schrift</button>
               <button type="button" class="btn" data-export="pdf">PDF</button>
               <button type="button" class="btn primary" data-export="gn" title="Als GoodNotes-Datei – jeder Strich radierbar">GoodNotes <small>radierbar</small></button>
             </div>
@@ -212,6 +215,63 @@
             <span class="muted page-info"></span>
             <div class="export">
               <button type="button" class="btn" data-export="png">Bild</button>
+              <button type="button" class="btn" data-export="cut" title="Durchsichtiges Bild nur mit der Schrift – zum Einfügen in eine GoodNotes-Seite">Nur Schrift</button>
+              <button type="button" class="btn" data-export="pdf">PDF</button>
+              <button type="button" class="btn primary" data-export="gn" title="Als GoodNotes-Datei – jeder Strich radierbar">GoodNotes <small>radierbar</small></button>
+            </div>
+          </div>
+          <div class="notice missing" hidden></div>
+          <div class="pages"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== TABELLE -->
+    <section id="tab-table" class="tab">
+      <div class="write-layout">
+        <aside class="panel controls">
+          <div class="field">
+            <label for="table-title">Überschrift (optional)</label>
+            <input type="text" id="table-title" class="input" placeholder="z. B. Vergleich der Planeten">
+          </div>
+          <div class="field">
+            <label for="table-text">Tabelle – eine Zeile pro Reihe, Spalten mit | trennen</label>
+            <textarea id="table-text" rows="9" placeholder="Name | Hauptstadt | Einwohner&#10;Deutschland | Berlin | 84 Mio.&#10;Frankreich | Paris | 68 Mio."></textarea>
+            <p class="muted small hint">Zellen mit <code>|</code> trennen (Tab oder <code>;</code> gehen auch). Tabellen aus ChatGPT kannst du direkt einfügen.</p>
+            <div class="row wrap">
+              <button type="button" class="btn small" data-paste>Einfügen</button>
+              <button type="button" class="btn small ghost" data-clear>Leeren</button>
+              <button type="button" class="btn small ghost" data-example>Beispiel</button>
+            </div>
+          </div>
+          <details open>
+            <summary>Aufbau</summary>
+            <label class="check small"><input type="checkbox" id="table-header"> Erste Zeile ist Kopfzeile (doppelt unterstrichen)</label>
+
+            <div class="field">
+              <span class="label">Seite</span>
+              <div class="segmented" id="table-orient">
+                <button type="button" data-v="hoch">Hochformat</button>
+                <button type="button" data-v="quer">Querformat</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="table-paper">Papiervorlage</label>
+              <select id="table-paper"></select>
+            </div>
+            <div class="field range"><label for="table-size">Schriftgröße <output></output></label><input type="range" id="table-size" min="40" max="160" step="5"></div>
+            <label class="check small"><input type="checkbox" id="table-color"> Bunt (farbige Kopfzeile und Überschrift)</label>
+            <button type="button" class="btn small ghost wide reroll" data-reroll>🎲 Neu würfeln</button>
+          </details>
+          <p class="muted small">Stift, Farbe, Strichstärke, Papierformat und Unordentlichkeit stellst du unter „Schreiben“ ein.</p>
+        </aside>
+
+        <div class="preview-col">
+          <div class="preview-bar">
+            <span class="muted page-info"></span>
+            <div class="export">
+              <button type="button" class="btn" data-export="png">Bild</button>
+              <button type="button" class="btn" data-export="cut" title="Durchsichtiges Bild nur mit der Schrift – zum Einfügen in eine GoodNotes-Seite">Nur Schrift</button>
               <button type="button" class="btn" data-export="pdf">PDF</button>
               <button type="button" class="btn primary" data-export="gn" title="Als GoodNotes-Datei – jeder Strich radierbar">GoodNotes <small>radierbar</small></button>
             </div>
@@ -281,6 +341,7 @@
         <div class="panel">
           <h3>So importierst du</h3>
           <p>Auf dem iPad öffnet „GoodNotes radierbar“ das Teilen-Menü → <b>GoodNotes</b> wählen. Oder Datei speichern und in GoodNotes über <b>Neu → Importieren</b> öffnen (nicht über „Seite hinzufügen“).</p>
+          <p class="small"><b>Tipp:</b> Willst du die Schrift in eine Seite einfügen, die du schon hast, nimm „Nur Schrift“. Das ist ein durchsichtiges Bild ohne Papier, genau auf die Schrift zugeschnitten. In GoodNotes einfügen und an die Stelle schieben, wo du es brauchst.</p>
           <p class="muted small">Pro Seite entsteht eine Datei. Der GoodNotes-Export ist neu und experimentell – wenn GoodNotes eine Datei ablehnt, nimm vorerst PDF oder Bild.</p>
           <h3>Direkt aus ChatGPT</h3>
           <p class="small">Jeder Link der Form <code id="share-link-example"></code> öffnet die App mit dem Text schon eingefügt. Der Text bleibt dabei auf deinem Gerät (er steht hinter dem #).</p>

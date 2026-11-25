@@ -29,7 +29,13 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' bypasses the browser's HTTP cache, so the new version really is new
+  e.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -47,19 +53,16 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET' || url.origin !== self.location.origin) return; // never touch other hosts (e.g. login API)
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {
-      const cached = await cache.match(req, { ignoreSearch: true });
-      const network = fetch(req)
-        .then((res) => {
-          if (res.ok) cache.put(req, res.clone());
-          return res;
-        })
-        .catch(() => null);
-      if (cached) {
-        e.waitUntil(network);
-        return cached;
+      try {
+        const res = await fetch(req, { cache: 'no-cache' }); // revalidate with the server
+        if (res.ok) cache.put(req, res.clone());
+        return res;
+      } catch (_) {
+        const cached = await cache.match(req, { ignoreSearch: true });
+        if (cached) return cached;
+        if (req.mode === 'navigate') return (await cache.match('./index.html')) || Response.error();
+        return Response.error();
       }
-      const res = await network;
-      return res || (req.mode === 'navigate' ? cache.match('./index.html') : Response.error());
     }),
   );
 });
