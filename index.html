@@ -88,6 +88,13 @@
 
           <details open>
             <summary>Schrift</summary>
+            <div class="field">
+              <span class="label">Schriftart</span>
+              <div class="segmented" data-script>
+                <button type="button" data-v="print">Druckschrift</button>
+                <button type="button" data-v="cursive">Schreibschrift</button>
+              </div>
+            </div>
             <div class="field range"><label for="set-size">Größe <output></output></label><input type="range" id="set-size" min="50" max="160" step="1"></div>
             <div class="field range"><label for="set-mess">Unordentlichkeit <output></output></label><input type="range" id="set-mess" min="0" max="100" step="1"></div>
             <div class="field range"><label for="set-slant">Neigung <output></output></label><input type="range" id="set-slant" min="-20" max="25" step="1"></div>
@@ -133,6 +140,13 @@
           </div>
           <details open>
             <summary>Aufbau</summary>
+            <div class="field">
+              <span class="label">Schriftart</span>
+              <div class="segmented" data-script>
+                <button type="button" data-v="print">Druckschrift</button>
+                <button type="button" data-v="cursive">Schreibschrift</button>
+              </div>
+            </div>
             <div class="field">
               <span class="label">Richtung</span>
               <div class="segmented" id="timeline-dir">
@@ -191,6 +205,13 @@
           </div>
           <details open>
             <summary>Aufbau</summary>
+            <div class="field">
+              <span class="label">Schriftart</span>
+              <div class="segmented" data-script>
+                <button type="button" data-v="print">Druckschrift</button>
+                <button type="button" data-v="cursive">Schreibschrift</button>
+              </div>
+            </div>
 
             <div class="field">
               <span class="label">Seite</span>
@@ -246,6 +267,13 @@
           </div>
           <details open>
             <summary>Aufbau</summary>
+            <div class="field">
+              <span class="label">Schriftart</span>
+              <div class="segmented" data-script>
+                <button type="button" data-v="print">Druckschrift</button>
+                <button type="button" data-v="cursive">Schreibschrift</button>
+              </div>
+            </div>
             <label class="check small"><input type="checkbox" id="table-header"> Erste Zeile ist Kopfzeile (doppelt unterstrichen)</label>
 
             <div class="field">
@@ -286,6 +314,11 @@
     <section id="tab-font" class="tab">
       <div class="font-layout">
         <div class="editor">
+          <div class="segmented font-mode" id="font-mode" role="group" aria-label="Welche Schrift zeichnest du?">
+            <button type="button" data-v="print">Druckschrift</button>
+            <button type="button" data-v="cursive">Schreibschrift</button>
+          </div>
+          <p class="muted small font-mode-hint" id="font-mode-hint" hidden>Schreibschrift: Hier zeichnest du nur die Buchstaben – mit An- und Abstrich, so wie im Heft. Ziffern und Satzzeichen nimmt die App aus deiner Druckschrift. Beim Schreiben verbindet sie die Buchstaben eines Wortes automatisch.</p>
           <div class="editor-head">
             <div class="cur-char" id="cur-char">a</div>
             <p id="cur-hint" class="muted"></p>

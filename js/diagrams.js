@@ -146,6 +146,7 @@ function makeWriter(font, base) {
       seed: (base.seed + ++n * 7919) >>> 0,
       align,
       indentJitter: 0.35, // labels: only a hint of the line-start wobble
+      cursive: base.cursive,
     });
     res.missing.forEach((c) => missing.add(c));
     const strokes = res.pages.flatMap((p) => p.strokes);
@@ -241,6 +242,7 @@ const opts = (o) => ({
   letterSpacing: o.letterSpacing ?? 1,
   wordSpacing: o.wordSpacing ?? 1,
   seed: o.seed || 1,
+  cursive: !!o.cursive,
 });
 
 // ------------------------------------------------------------------ timeline

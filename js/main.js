@@ -28,6 +28,7 @@ const DEFAULTS = {
   lineSpacing: 0,
   margin: DEFAULT_MARGIN, // mm from the page edge to the text
   seed: 12345,
+  script: 'print', // 'print' = Druckschrift, 'cursive' = Schreibschrift
   stripMd: true,
   keepGnBackground: false,
   // Zeitstrahl / Mindmap
@@ -48,7 +49,7 @@ const DEFAULTS = {
 };
 
 // Shown next to the logo so you can see which version is running (keep in sync with sw.js).
-const APP_VERSION = 11;
+const APP_VERSION = 12;
 
 const DIAGRAM_KINDS = ['timeline', 'mindmap', 'table'];
 const DIAGRAM_NAMES = { timeline: 'Zeitstrahl', mindmap: 'Mindmap', table: 'Tabelle' };
@@ -109,6 +110,11 @@ const INK_SWATCHES = [
   ['#f2f2f2', 'Weiß'],
 ];
 
+// Which glyph set "Meine Schrift" edits: Druckschrift or Schreibschrift (font.cursive).
+let fontMode = 'print';
+const editorFont = () => (fontMode === 'cursive' ? (state.font.cursive ||= { glyphs: {} }) : state.font);
+const hasCursive = () => !!(state.font.cursive && Object.keys(state.font.cursive.glyphs || {}).length);
+
 const state = {
   font: { version: 1, glyphs: {} },
   settings: { ...DEFAULTS },
@@ -153,11 +159,23 @@ async function init() {
   DIAGRAM_KINDS.forEach(initDiagramTab);
 
   const editor = createEditor({
-    getFont: () => state.font,
+    getFont: editorFont,
     saveFont: () => store.set('font', state.font),
     onChange: () => scheduleRender(),
   });
   state.editor = editor;
+  $('font-mode').onclick = (e) => {
+    const b = e.target.closest('button');
+    if (b) setFontMode(b.dataset.v);
+  };
+  setFontMode('print');
+  // Schriftart in every tab (one shared setting)
+  document.querySelectorAll('[data-script]').forEach((el) => {
+    el.onclick = (e) => {
+      const b = e.target.closest('button');
+      if (b) update({ script: b.dataset.v });
+    };
+  });
 
   document.querySelectorAll('[data-tab]').forEach((b) =>
     b.addEventListener('click', () => showTab(b.dataset.tab)),
@@ -203,6 +221,14 @@ async function init() {
   render();
   store.requestPersistence();
   initCloud(); // optional login + sync; listens to store changes
+}
+
+function setFontMode(m) {
+  fontMode = m === 'cursive' ? 'cursive' : 'print';
+  document.body.dataset.fontMode = fontMode; // read by the Schreibblatt import (sheet-ui.js)
+  document.querySelectorAll('#font-mode button').forEach((b) => b.classList.toggle('on', b.dataset.v === fontMode));
+  $('font-mode-hint').hidden = fontMode !== 'cursive';
+  state.editor.setMode(fontMode);
 }
 
 function fail(err) {
@@ -332,6 +358,7 @@ function syncSettingsUi() {
     b.classList.toggle('on', b.dataset.v === s.orientation);
     b.disabled = s.pageFormat === 'vorlage';
   });
+  document.querySelectorAll('[data-script] button').forEach((b) => b.classList.toggle('on', b.dataset.v === s.script));
   for (const k of DIAGRAM_KINDS) {
     document.querySelectorAll(`#${k}-orient button`).forEach((b) => {
       b.classList.toggle('on', b.dataset.v === s[`${k}Orient`]);
@@ -376,7 +403,9 @@ function compute() {
     letterSpacing: s.letterSpacing / 100,
     wordSpacing: s.wordSpacing / 100,
     seed: s.seed,
+    cursive: s.script === 'cursive',
   });
+  res.cursive = s.script === 'cursive';
   res.page = page;
   res.paper = paperOps(s.paper, s.paperColor, page, s.lineSpacing || 0, s.margin);
   res.pen = { type: s.penType, color: s.inkColor, width: clampPenWidth(s.penWidth) };
@@ -419,14 +448,18 @@ function showPages(wrap, res) {
 
 function showMissing(miss, res) {
   const glyphCount = Object.keys(state.font.glyphs).length;
+  const mode = res.cursive ? 'cursive' : 'print';
   if (!glyphCount) {
     miss.hidden = false;
     miss.innerHTML = `Du hast noch keine Buchstaben gezeichnet. <button type="button" class="link" data-go="font">Jetzt deine Schrift anlegen →</button>`;
+  } else if (res.cursive && !hasCursive()) {
+    miss.hidden = false;
+    miss.innerHTML = `Du hast noch keine Schreibschrift gezeichnet – bis dahin siehst du deine Druckschrift. <button type="button" class="link" data-go="font">Schreibschrift anlegen →</button>`;
   } else if (res.missing.size) {
     miss.hidden = false;
     const chars = [...res.missing].sort((a, b) => ALL_CHARS.indexOf(a) - ALL_CHARS.indexOf(b));
     miss.innerHTML =
-      `Diese Zeichen fehlen noch in deiner Schrift: ` +
+      (res.cursive ? 'Diese Buchstaben fehlen noch in deiner Schreibschrift (solange nimmt die App die Druckschrift): ' : 'Diese Zeichen fehlen noch in deiner Schrift: ') +
       chars.map((c) => `<button type="button" class="chip" data-char="${encodeURIComponent(c)}">${escapeHtml(c)}</button>`).join(' ');
   } else {
     miss.hidden = true;
@@ -434,11 +467,11 @@ function showMissing(miss, res) {
   miss.onclick = (e) => {
     const go = e.target.closest('[data-go]');
     const ch = e.target.closest('[data-char]');
-    if (go) showTab('font');
-    if (ch) {
+    if (go || ch) {
       showTab('font');
-      state.editor.select(decodeURIComponent(ch.dataset.char));
+      setFontMode(mode);
     }
+    if (ch) state.editor.select(decodeURIComponent(ch.dataset.char));
   };
 }
 
@@ -663,6 +696,7 @@ function computeDiagram(kind, forTemplate = false) {
     letterSpacing: s.letterSpacing / 100,
     wordSpacing: s.wordSpacing / 100,
     seed: s.seed,
+    cursive: s.script === 'cursive',
   };
   let res;
   if (kind === 'timeline') {
@@ -678,6 +712,7 @@ function computeDiagram(kind, forTemplate = false) {
     res.text = raw;
   }
   if (!res.pages.length) res.pages = [{ strokes: [] }];
+  res.cursive = o.cursive;
   res.page = page;
   res.paper = paperOps(s[`${kind}Paper`], s.paperColor, page, 0, s.margin);
   res.pen = { type: s.penType, color: s.inkColor, width: clampPenWidth(s.penWidth) };
@@ -751,8 +786,14 @@ async function importFont(file) {
   const data = JSON.parse(await file.text());
   if (!data || typeof data.glyphs !== 'object') throw new Error('Das ist keine Handschrift-Datei.');
   const replace = confirm('Vorhandene Buchstaben ersetzen? (Abbrechen = zusammenführen)');
-  if (replace) state.font = { version: 1, glyphs: data.glyphs };
-  else for (const [ch, list] of Object.entries(data.glyphs)) (state.font.glyphs[ch] ||= []).push(...list);
+  if (replace) {
+    state.font = { version: 1, glyphs: data.glyphs };
+    if (data.cursive && data.cursive.glyphs) state.font.cursive = { glyphs: data.cursive.glyphs };
+  } else {
+    for (const [ch, list] of Object.entries(data.glyphs)) (state.font.glyphs[ch] ||= []).push(...list);
+    const cg = (data.cursive && data.cursive.glyphs) || {};
+    for (const [ch, list] of Object.entries(cg)) ((state.font.cursive ||= { glyphs: {} }).glyphs[ch] ||= []).push(...list);
+  }
   await store.set('font', state.font);
   $('font-import').value = '';
   state.editor.refresh();

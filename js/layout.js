@@ -30,10 +30,10 @@ const heightAbove = (strokes) => {
   return bb ? -bb.y0 : 0;
 };
 
-/** Median height of the user's small letters (glyph units), 0.5 if unknown. */
-export function xHeightOf(font) {
+/** Median height of the small letters of a glyph set (glyph units), 0.5 if unknown. */
+export function xHeightOf(glyphs) {
   const hs = [];
-  for (const ch of SMALL) for (const v of font.glyphs[ch] || []) {
+  for (const ch of SMALL) for (const v of glyphs[ch] || []) {
     const h = heightAbove(clean(v.s));
     if (h > 0.05) hs.push(h);
   }
@@ -50,6 +50,75 @@ export function tallFix(ch, strokes, xh) {
   return Math.min(2.2, (xh * TARGET_TALL) / h);
 }
 
+const LETTER = /^[A-Za-zÄÖÜäöüß]$/;
+
+// ---- Schreibschrift: where a letter is left (exit) and entered (entry)
+const strokeLen = (s) => {
+  let l = 0;
+  for (let i = 3; i < s.length; i += 3) l += Math.hypot(s[i] - s[i - 3], s[i + 1] - s[i - 2]);
+  return l;
+};
+function direction(s, fromEnd) {
+  const n = s.length / 3;
+  const k = Math.min(n - 1, 3);
+  if (k < 1) return [1, 0];
+  const a = fromEnd ? n - 1 - k : 0, b = fromEnd ? n - 1 : k;
+  const dx = s[b * 3] - s[a * 3], dy = s[b * 3 + 1] - s[a * 3 + 1];
+  const l = Math.hypot(dx, dy) || 1;
+  return [dx / l, dy / l];
+}
+/**
+ * Exit = end of the main (longest) stroke if it ends on the right, else the stroke
+ * ending furthest right; entry = start of the first stroke if it starts on the left.
+ * Dots, accents and t-bars are drawn later and are short, so they are skipped.
+ * Only joins in the lower zone (baseline … a bit above the x-height) count.
+ */
+function joints(strokes, x0, x1, cap) {
+  if (!strokes.length) return {};
+  const lens = strokes.map(strokeLen);
+  const max = Math.max(...lens);
+  const cands = strokes.map((s, i) => i).filter((i) => lens[i] >= max * 0.3 && strokes[i].length >= 6);
+  if (!cands.length) return {};
+  const w = x1 - x0 || 1;
+  const endX = (i) => strokes[i][strokes[i].length - 3];
+  const main = lens.indexOf(max);
+  let ex = endX(main) >= x0 + 0.55 * w ? main : cands.reduce((a, b) => (endX(b) > endX(a) ? b : a));
+  let en = cands.includes(0) && strokes[0][0] <= x0 + 0.45 * w ? 0 : cands.reduce((a, b) => (strokes[b][0] < strokes[a][0] ? b : a));
+  const inZone = (y) => y <= 0.2 * cap && y >= -0.85 * cap;
+  const out = {};
+  const se = strokes[ex], n = se.length;
+  if (inZone(se[n - 2]) && se[n - 3] >= x0 + 0.5 * w) out.exit = { x: se[n - 3], y: se[n - 2], p: se[n - 1], dir: direction(se, true) };
+  const sn = strokes[en];
+  if (inZone(sn[1]) && sn[0] <= x0 + 0.5 * w) out.entry = { x: sn[0], y: sn[1], p: sn[2], dir: direction(sn, false) };
+  return out;
+}
+
+/** Smooth hand-drawn join from the exit of one letter to the entry of the next. */
+function joinStroke(a, b) {
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  // never shoot backwards: blend odd directions towards "to the right"
+  const fix = (d) => {
+    let [x, y] = d;
+    if (x < 0.3) x = 0.3 + Math.max(0, x) * 0.5;
+    const l = Math.hypot(x, y) || 1;
+    return [x / l, y / l];
+  };
+  const da = fix(a.dir), db = fix(b.dir);
+  const L = Math.max(dist * 0.42, 0.01);
+  const p1 = [a.x + da[0] * L, a.y + da[1] * L], p2 = [b.x - db[0] * L, b.y - db[1] * L];
+  const n = Math.max(4, Math.round(dist * 2.5));
+  const out = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, u = 1 - t;
+    out.push(
+      u * u * u * a.x + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t * t * t * b.x,
+      u * u * u * a.y + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t * t * t * b.y,
+      a.p + (b.p - a.p) * t,
+    );
+  }
+  return out;
+}
+
 const scaleStrokes = (strokes, f) => (f === 1 ? strokes : strokes.map((st) => st.map((v, i) => (i % 3 === 2 ? v : v * f))));
 
 /**
@@ -57,7 +126,8 @@ const scaleStrokes = (strokes, f) => (f === 1 ? strokes : strokes.map((st) => st
  * @param {object} font  { glyphs: { [char]: [{ s: number[][] }] } }
  * @param {object} o     { page:{w,h}, geo:{spacing,left,right,bottom,firstBaseline},
  *                         capHeight, messiness(0..1), slant(deg), letterSpacing, wordSpacing, seed,
- *                         align?: 'left'|'center'|'right' (within geo.left..geo.right) }
+ *                         align?: 'left'|'center'|'right' (within geo.left..geo.right),
+ *                         cursive?: true → Schreibschrift: font.cursive.glyphs, letters joined }
  * @returns {{ pages: { strokes: number[][] }[], missing: Set<string>, lines: number }}
  */
 export function layoutText(text, font, o) {
@@ -67,7 +137,11 @@ export function layoutText(text, font, o) {
   const missing = new Set();
   const lastVariant = new Map();
   const slantTan = Math.tan((o.slant || 0) * DEG);
-  const xh = xHeightOf(font);
+  // Schreibschrift uses its own glyph set; digits, punctuation and letters not drawn
+  // yet come from the Druckschrift (missing letters are still reported).
+  const cursive = !!o.cursive;
+  const glyphs = cursive ? (font.cursive && font.cursive.glyphs) || {} : font.glyphs;
+  const xh = xHeightOf(Object.keys(glyphs).some((c) => SMALL.includes(c)) ? glyphs : font.glyphs);
   // how strongly line starts and word heights vary: 1 at the default messiness (35 %)
   const vary = Math.min(1.8, m / 0.35) * (o.indentJitter ?? 1);
 
@@ -88,8 +162,14 @@ export function layoutText(text, font, o) {
 
   // ---- build one glyph instance (strokes in mm, relative to baseline origin)
   function variantsFor(ch) {
-    const v = font.glyphs[ch];
-    return v && v.length ? v : null;
+    const v = glyphs[ch];
+    if (v && v.length) return v;
+    if (!cursive) return null;
+    if (COMPOSE[ch] && glyphs[COMPOSE[ch][0]]) return null; // ä from the cursive a + dots
+    const p = font.glyphs[ch];
+    if (!p || !p.length) return null;
+    if (LETTER.test(ch)) missing.add(ch); // only drawn in Druckschrift so far
+    return p;
   }
 
   function pickVariant(ch, list) {
@@ -153,7 +233,9 @@ export function layoutText(text, font, o) {
       return out;
     });
     const bb = bbox(strokes);
-    return { strokes, x0: bb.x0, x1: bb.x1 };
+    const g = { strokes, x0: bb.x0, x1: bb.x1 };
+    if (cursive && LETTER.test(ch)) Object.assign(g, joints(strokes, bb.x0, bb.x1, cap));
+    return g;
   }
 
   // ---- words → glyph runs
@@ -169,18 +251,34 @@ export function layoutText(text, font, o) {
     return d * vary;
   };
 
+  // Schreibschrift: letters sit closer, the join bridges the small gap
+  const joinGap = () => cap * (0.07 * (o.letterSpacing ?? 1) + (rng() - 0.5) * 0.04 * m);
+
   function buildWord(word) {
     const items = [];
     let x = 0;
+    let prev = null; // previous item, if the next letter may join it
     for (const ch of word) {
       const g = makeGlyph(ch);
       if (!g) {
         x += cap * 0.55;
+        prev = null;
         continue;
       }
-      const shift = (items.length ? x + letterGap() : x) - g.x0;
-      items.push({ g, shift });
+      let shift = (items.length ? x + letterGap() : x) - g.x0;
+      let join = null;
+      if (prev && prev.g.exit && g.entry) {
+        const ex = prev.shift + prev.g.exit.x;
+        // join point a little right of the exit, but the letters' bodies must not collide
+        shift = Math.max(ex + joinGap() - g.entry.x, x - cap * 0.12 - g.x0);
+        const a = { ...prev.g.exit, x: ex };
+        const b = { ...g.entry, x: g.entry.x + shift };
+        if (Math.hypot(b.x - a.x, b.y - a.y) > cap * 0.02) join = joinStroke(a, b);
+      }
+      const it = { g, shift, join };
+      items.push(it);
       x = shift + g.x1;
+      prev = it;
     }
     return { items, width: x };
   }
@@ -237,6 +335,7 @@ export function layoutText(text, font, o) {
         x += gap;
       }
       // very long word: break it across lines letter by letter
+      let broke = false; // a letter-wise line break cuts the join to the next letter
       for (const it of w.items) {
         const gx = x + it.shift;
         if (gx + it.g.x1 > o.geo.right && it !== w.items[0] && gx > o.geo.left + cap) {
@@ -244,7 +343,15 @@ export function layoutText(text, font, o) {
           newLine();
           lineCount++;
           x = o.geo.left - it.shift - it.g.x0;
+          broke = true;
         }
+        if (it.join && !broke) {
+          // join strokes are in word coordinates
+          let jx0 = Infinity, jx1 = -Infinity;
+          for (let i = 0; i < it.join.length; i += 3) (jx0 = Math.min(jx0, it.join[i])), (jx1 = Math.max(jx1, it.join[i]));
+          lineItems.push({ strokes: [it.join], dy, x, x0: x + jx0, x1: x + jx1 });
+        }
+        broke = false;
         lineItems.push({ strokes: it.g.strokes, dy, x: x + it.shift, x0: x + it.shift + it.g.x0, x1: x + it.shift + it.g.x1 });
       }
       x += w.width;

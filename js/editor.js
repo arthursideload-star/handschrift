@@ -1,5 +1,5 @@
 // "Meine Schrift": draw each character a few times with Apple Pencil / mouse.
-import { GROUPS, ALL_CHARS, HINTS } from './charset.js';
+import { GROUPS as ALL_GROUPS, HINTS } from './charset.js';
 import { simplify, roundStroke, toQuads, cleanStroke } from './geom.js';
 import { toast } from './util.js';
 
@@ -20,6 +20,11 @@ export function createEditor({ getFont, saveFont, onChange }) {
   const progressEl = document.getElementById('font-progress');
   const autoNext = document.getElementById('auto-next');
 
+  // 'print' = Druckschrift (all characters), 'cursive' = Schreibschrift (letters only;
+  // digits and punctuation come from the Druckschrift)
+  let mode = 'print';
+  let GROUPS = ALL_GROUPS;
+  let ALL_CHARS = GROUPS.flatMap((g) => [...g.chars]);
   let current = ALL_CHARS[0];
   let strokes = []; // strokes being drawn (glyph units)
   let active = null;
@@ -95,7 +100,10 @@ export function createEditor({ getFont, saveFont, onChange }) {
     // ghost of the character
     ctx.save();
     ctx.fillStyle = 'rgba(40, 60, 90, 0.06)';
-    const family = '"Segoe Print", "Bradley Hand", "Comic Sans MS", cursive';
+    const family =
+      mode === 'cursive'
+        ? '"Snell Roundhand", "Apple Chancery", "Brush Script MT", "Segoe Script", cursive'
+        : '"Segoe Print", "Bradley Hand", "Comic Sans MS", cursive';
     let size = v.s * 1.05;
     // size the example so it fills exactly the shaded zone (capitals up to the top line)
     if (zone != null) {
@@ -219,6 +227,9 @@ export function createEditor({ getFont, saveFont, onChange }) {
     strokes = [];
     curEl.textContent = ch === ' ' ? '␣' : ch;
     hintEl.textContent =
+      (mode === 'cursive' && ch !== '¨'
+        ? `Schreibschrift: ${/[A-ZÄÖÜ]/.test(ch) ? 'Großbuchstabe bis zur oberen Linie. ' : ''}Fang unten links mit dem Anstrich an und hör rechts mit dem Abstrich auf – wie im Heft. Die App verbindet die Buchstaben selbst.`
+        : null) ||
       HINTS[ch] ||
       (/[A-ZÄÖÜ]/.test(ch)
         ? 'Großbuchstabe: von der dicken Grundlinie bis ganz nach oben zur oberen Linie – deutlich größer als die Kleinbuchstaben.'
@@ -348,6 +359,14 @@ export function createEditor({ getFont, saveFont, onChange }) {
       draw();
     },
     select,
+    /** Switch between Druckschrift and Schreibschrift (getFont must follow). */
+    setMode(m) {
+      mode = m === 'cursive' ? 'cursive' : 'print';
+      GROUPS = mode === 'cursive' ? ALL_GROUPS.slice(0, 3) : ALL_GROUPS; // letters, umlauts, ß
+      ALL_CHARS = GROUPS.flatMap((g) => [...g.chars]);
+      const font = getFont();
+      select(ALL_CHARS.find((c) => (font.glyphs[c] || []).length < TARGET_VARIANTS) || ALL_CHARS[0]);
+    },
   };
 }
 

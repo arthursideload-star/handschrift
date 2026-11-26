@@ -105,12 +105,14 @@ function mount() {
         notes.map((n) => `<p class="muted">${n}</p>`).join('');
       return;
     }
+    const cursive = document.body.dataset.fontMode === 'cursive'; // "Meine Schrift" is set to Schreibschrift
     const font = (await store.get('font').catch(() => null)) || { version: 1, glyphs: {} };
-    const existing = Object.keys(res.glyphs).filter((ch) => (font.glyphs?.[ch] || []).length);
+    const target = cursive ? font.cursive || {} : font;
+    const existing = Object.keys(res.glyphs).filter((ch) => (target.glyphs?.[ch] || []).length);
     const chars = ALL_CHARS.filter((ch) => res.glyphs[ch]);
     const missing = ALL_CHARS.length - chars.length;
     result.innerHTML = `
-      <p><b>${res.chars} Zeichen</b> mit <b>${res.variants} Varianten</b> gefunden${missing ? ` (${missing} Zeichen leer)` : ''}.</p>
+      <p><b>${res.chars} Zeichen</b> mit <b>${res.variants} Varianten</b> gefunden${missing ? ` (${missing} Zeichen leer)` : ''}. Sie kommen in deine <b>${cursive ? 'Schreibschrift' : 'Druckschrift'}</b> (umschalten oben im Editor).</p>
       ${notes.map((n) => `<p class="muted">${n}</p>`).join('')}
       <div class="sheet-preview">${chars
         .map((ch) => `<figure title="${escapeHtml(ch)}: ${res.glyphs[ch].length} Variante(n)"><figcaption>${escapeHtml(ch)}</figcaption>${glyphSvg(res.glyphs[ch][0].s)}</figure>`)
@@ -131,7 +133,9 @@ function mount() {
         }
         try {
           const current = (await store.get('font')) || { version: 1, glyphs: {} };
-          const merged = mergeGlyphs(current, res.glyphs, b.dataset.mode);
+          const merged = cursive
+            ? { ...current, cursive: mergeGlyphs(current.cursive, res.glyphs, b.dataset.mode) }
+            : mergeGlyphs(current, res.glyphs, b.dataset.mode);
           await store.set('font', merged);
           window.dispatchEvent(new CustomEvent('font-changed', { detail: { font: merged, source: 'sheet' } }));
           result.innerHTML = `<p>✓ ${res.chars} Zeichen übernommen.</p>`;
