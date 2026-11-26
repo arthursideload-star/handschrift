@@ -1,5 +1,6 @@
 // Offline support: the app opens even without internet (e.g. bad school Wi-Fi).
-// Strategy: serve from cache immediately, refresh the cache in the background.
+// Strategy: network first (always the newest version when online), cache only as
+// fallback when offline. Keep VERSION in sync with APP_VERSION in js/main.js.
 const VERSION = 'v12';
 const CACHE = `handschrift-${VERSION}`;
 const SHELL = [
